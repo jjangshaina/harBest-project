@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "873397291520",
+    "project_id": "harbest-mustardgreenanalytics",
+    "storage_bucket": "harbest-mustardgreenanalytics.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:873397291520:android:a186f19afb8bbcc11d66e5",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_harbest_1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "873397291520-db0e3s3rib73tlt3c7be4jtjhd27qq2m.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWlP4irI-nu2Vi5WxiBKNNRsHlWSwdsyE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "873397291520-db0e3s3rib73tlt3c7be4jtjhd27qq2m.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
