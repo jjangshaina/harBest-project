@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_application_harbest_1/pages/log_in.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart';
-import 'package:flutter_application_harbest_1/security/storing_data.dart';
 
+// The single, live verification screen. Reached from get_started.dart right
+// after signup (user stays signed in) and from log_in.dart if someone tries
+// to log in before verifying. Polls Firebase for verification status and
+// keeps Firestore's isVerified field in sync once it detects success.
 class EmailVerification extends StatefulWidget {
   const EmailVerification({super.key});
 
@@ -38,14 +42,23 @@ class _EmailVerificationState extends State<EmailVerification> {
   void _startPolling() {
     _checkTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       await _user?.reload(); // Refresh user data from Firebase
-      if (_user?.emailVerified == true) {
+      final refreshedUser = FirebaseAuth.instance.currentUser;
+
+      if (refreshedUser?.emailVerified == true) {
         _checkTimer?.cancel(); // Stop polling once verified
         if (!mounted) return;
 
-        // Save login session so app remembers user on next launch
-        await StoringData().setLoginStatus(true);
+        // Keep Firestore's isVerified field in sync with the real Auth
+        // status, same as the login flow does. Non-critical if it fails —
+        // don't block navigation on it.
+        try {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(refreshedUser!.uid)
+              .set({'isVerified': true}, SetOptions(merge: true));
+        } catch (_) {}
 
-        // Navigate to Dashboard (not HomePage) after verification
+        if (!mounted) return;
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const UserDashboard()),

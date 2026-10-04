@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_harbest_1/pages/log_in.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_application_harbest_1/security/email_verification.dart';
 
 // disposable/fake email domains that are not allowed
 const Set<String> _blockedDomains = {
@@ -36,14 +37,14 @@ bool _isValidEmail(String email) {
 
 String _emailError(String email) {
   final trimmed = email.trim();
-  if (trimmed.isEmpty) return 'Email address is required'; // Empty field
+  if (trimmed.isEmpty) return 'Email address is required.'; // Empty field
   final domain = trimmed.contains('@')
       ? trimmed.split('@')[1].toLowerCase()
       : '';
   if (_blockedDomains.contains(domain)) {
     return 'Disposable email addresses are not allowed'; // Blocked domain
   }
-  return 'Enter a valid email address (e.g. name@example.com)'; // Generic format error
+  return 'Enter a valid email address. (e.g. example@gmail.com)'; // Generic format error
 }
 
 // widget for the registration/sign-up screen
@@ -65,7 +66,6 @@ class _GetStartedState extends State<GetStarted> {
 
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
-  final _countryController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
@@ -85,7 +85,6 @@ class _GetStartedState extends State<GetStarted> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
-    _countryController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
@@ -127,7 +126,6 @@ class _GetStartedState extends State<GetStarted> {
   bool get _formIsValid =>
       _nameController.text.isNotEmpty &&
       _emailValid &&
-      _countryController.text.isNotEmpty &&
       _passwordController.text.isNotEmpty &&
       _confirmPasswordController.text.isNotEmpty &&
       _allRequirementsMet &&
@@ -170,30 +168,46 @@ Future<void> _onCreateAccount() async {
           password: _passwordController.text,
         );
 
-    // trigger verification email 
-    await userCredential.user!.sendEmailVerification();
+    // save user record to Firestore first. If this fails, roll back the
+    // just-created Auth account so we don't leave an orphaned account with
+    // no Firestore doc — which would silently break the rest of the app
+    // and block the user from ever signing up again with this email.
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set({
+            'fullName': _nameController.text.trim(),
+            'email': _emailController.text.trim(),
+            'createdAt': FieldValue.serverTimestamp(),
+            'focus_crop': 'Mustard Green',
+            // Reflects real verification status; the user hasn't clicked
+            // the verification email yet at this point in the flow.
+            'isVerified': false,
+          });
+    } catch (firestoreError) {
+      try {
+        await userCredential.user!.delete();
+      } catch (_) {
+        // Best-effort cleanup; if this also fails we still rethrow below
+        // so the user sees an error rather than a false "success".
+      }
+      rethrow;
+    }
 
-    // save user record to Firestore
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userCredential.user!.uid)
-        .set({
-          'email': _emailController.text.trim(),
-          'createdAt': FieldValue.serverTimestamp(), 
-          'focus_crop': 'Mustard Green', 
-          'isVerified': true, // Add this to track status in your database
-        });
+    // trigger verification email
+    await userCredential.user!.sendEmailVerification();
 
     if (!context.mounted) return;
 
-    // --- UPDATED NAVIGATION ---
-    // Instead of going to HomePage, user should sign out and ask to verify
-    await FirebaseAuth.instance.signOut();
-    
-    _showSnackBar('Success! Please check your email inbox to verify your account.');
-
-    // Navigate back to Login screen so they can sign in after verifying
-    Navigator.pop(context); 
+    // Keep the user signed in and send them to the dedicated verification
+    // screen, which polls for verification and auto-continues into the
+    // Dashboard once confirmed — no separate re-login required.
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const EmailVerification()),
+      (_) => false,
+    );
 
   } on FirebaseAuthException catch (e) {
     if (!context.mounted) return;
@@ -276,12 +290,12 @@ Future<void> _onCreateAccount() async {
                     hint: 'Full Name',
                     controller: _nameController,
                     showError: _submitAttempted && _nameController.text.isEmpty,
-                    errorText: 'Full Name is required',
+                    errorText: 'Full Name is required.',
                   ),
 
                   // Email input field with real-time validation feedback
                   _buildTextField( 
-                    hint: 'name@example.com',
+                    hint: 'example@gmail.com',
                     controller: _emailController,
                     keyboardType:
                         TextInputType.emailAddress, 
@@ -303,15 +317,6 @@ Future<void> _onCreateAccount() async {
                         : Colors.redAccent,
                   ),
 
-                  
-                  _buildTextField(
-                    hint: 'Country',
-                    controller: _countryController,
-                    suffixIcon: Icons.location_on_outlined,
-                    showError:
-                        _submitAttempted && _countryController.text.isEmpty,
-                    errorText: 'Country is required',
-                  ),
 
                   // Password input field
                   _buildPasswordField(
@@ -324,7 +329,7 @@ Future<void> _onCreateAccount() async {
                     onChanged: _onPasswordChanged,
                     showError:
                         _submitAttempted && _passwordController.text.isEmpty,
-                    errorText: 'Password is required',
+                    errorText: 'Password is required.',
                   ),
 
                   // Show password requirements checklist if user is typing but not done yet
@@ -344,7 +349,7 @@ Future<void> _onCreateAccount() async {
                     showError:
                         _submitAttempted &&
                         _confirmPasswordController.text.isEmpty,
-                    errorText: 'Please confirm your password',
+                    errorText: 'Please confirm your password.',
                   ),
 
                   // Show match/mismatch indicator once user starts typing in confirm field

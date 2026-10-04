@@ -2,15 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_harbest_1/pages/get_started.dart';
 import 'package:flutter_application_harbest_1/pages/log_in.dart';
 
+// Plain widget now, not its own MaterialApp — relies on the single root
+// MaterialApp defined in main.dart. Kept as a class (rather than being
+// removed and replaced everywhere with WelcomeScreen) so existing
+// Navigator calls elsewhere in the app (e.g. logout) don't need to change.
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: const WelcomeScreen(),
-    );
+    return const WelcomeScreen();
   }
 }
 
@@ -29,7 +30,7 @@ class WelcomeScreen extends StatelessWidget {
           children: [
             const Spacer(flex: 3),
 
-            // App Title & Tagline
+            // app title
             const Text(
               'HarBest',
               style: TextStyle(
