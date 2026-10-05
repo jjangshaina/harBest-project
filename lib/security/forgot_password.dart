@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
+import 'package:flutter_application_harbest_1/widgets/app_header.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/widgets/app_text_field.dart';
 
 class ForgotPassword extends StatefulWidget {
   const ForgotPassword({super.key, this.initialEmail});
@@ -17,18 +22,10 @@ class _ForgotPasswordState extends State<ForgotPassword> {
 
   late final _emailController =
       TextEditingController(text: widget.initialEmail?.trim() ?? '');
-  final FocusNode _emailFocus = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    _emailFocus.addListener(() => setState(() {}));
-  }
 
   @override
   void dispose() {
     _emailController.dispose();
-    _emailFocus.dispose();
     super.dispose();
   }
 
@@ -88,65 +85,20 @@ class _ForgotPasswordState extends State<ForgotPassword> {
   }
 
   void _showSnackBar(String message, {required bool isError}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor:
-            isError ? Colors.redAccent.shade700 : Colors.green.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 4),
-      ),
+    AppSnack.show(
+      context,
+      message,
+      type: isError ? AppSnackType.error : AppSnackType.success,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       resizeToAvoidBottomInset: true,
       body: Column(
         children: [
-          // Green header with rounded bottom corners — matches the My
-          // Account page: circular white back button + bold white title.
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              color: Color(0xFF7DB343),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(28),
-                bottomRight: Radius.circular(28),
-              ),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 20, 28),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: Colors.white.withOpacity(0.9),
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new,
-                            color: Colors.black, size: 18),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    const Text(
-                      'Reset your password',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          const AppHeader(title: 'Reset your password', showBack: true),
 
           // Body — text and field scroll if needed, button always pinned
           // to the bottom of the screen.
@@ -161,87 +113,36 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             "Enter the email address associated with your account "
                             "and we'll send you an email to reset your password.",
                             textAlign: TextAlign.justify,
-                            style: TextStyle(
-                              color: Colors.black87,
-                              fontSize: 15,
-                              height: 1.5,
-                            ),
+                            style: AppText.body.copyWith(height: 1.5),
                           ),
-                          const SizedBox(height: 24),
-                          _buildEmailField(),
+                          const SizedBox(height: 18),
+                          AppTextField(
+                            hint: 'Email Address',
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
+                          ),
                         ],
                       ),
                     ),
                   ),
 
                   // Reset password button, anchored at the bottom
-                  Container(
-                    width: double.infinity,
-                    height: 62,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(30),
-                      color: const Color(0xFF7DB343),
-                    ),
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                      ),
-                      onPressed: _isSending ? null : _onResetPassword,
-                      child: _isSending
-                          ? const SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2.5),
-                            )
-                          : const Text(
-                              'Reset password',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                    ),
+                  AppButton(
+                    label: 'Reset password',
+                    expanded: true,
+                    loading: _isSending,
+                    onPressed: _onResetPassword,
                   ),
                 ],
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildEmailField() {
-    final isFocused = _emailFocus.hasFocus;
-
-    return TextField(
-      controller: _emailController,
-      focusNode: _emailFocus,
-      keyboardType: TextInputType.emailAddress,
-      autocorrect: false,
-      decoration: InputDecoration(
-        hintText: 'Email Address',
-        fillColor: isFocused ? Colors.white : const Color(0xFFD9D9D9),
-        filled: true,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF7DB343), width: 2),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       ),
     );
   }

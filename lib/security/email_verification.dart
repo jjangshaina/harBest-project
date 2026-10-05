@@ -4,6 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_application_harbest_1/pages/log_in.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 
 // The single, live verification screen. Reached from get_started.dart right
 // after signup (user stays signed in) and from log_in.dart if someone tries
@@ -76,25 +79,18 @@ class _EmailVerificationState extends State<EmailVerification> {
       await _user?.sendEmailVerification();
       _startCooldown();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: 
-          const Text('Verification email resent. Please check your inbox.'),
-          backgroundColor: Colors.green.shade700,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
+      AppSnack.show(
+        context,
+        'Verification email resent. Please check your inbox.',
+        type: AppSnackType.success,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       // Show error if resend fails
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message ?? 'Failed to resend. Please try again.'),
-          backgroundColor: Colors.redAccent.shade700,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
+      AppSnack.show(
+        context,
+        e.message ?? 'Failed to resend. Please try again.',
+        type: AppSnackType.error,
       );
     } finally {
       if (mounted) setState(() => _isResending = false);
@@ -130,7 +126,7 @@ class _EmailVerificationState extends State<EmailVerification> {
     final canResend = !_isResending && _cooldownSeconds <= 0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF2D5A27), 
+      backgroundColor: AppColors.authBackground,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 30),
@@ -144,15 +140,16 @@ class _EmailVerificationState extends State<EmailVerification> {
                   color: Colors.white.withOpacity(0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.mark_email_unread_outlined, color: Colors.white, size: 60),
+                child: const Icon(
+                  AppIcons.emailUnread,
+                  color: Colors.white,
+                  size: 60,
+                ),
               ),
 
               const SizedBox(height: 32),
 
-              const Text(
-                'Verify your email',
-                style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold),
-              ),
+              const Text('Verify your email', style: AppText.authTitle),
 
               const SizedBox(height: 16),
 
@@ -160,45 +157,29 @@ class _EmailVerificationState extends State<EmailVerification> {
               Text(
                 'We sent a verification link to\n${_user?.email ?? 'your email address'}',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 15, height: 1.5),
+                style: AppText.authBody,
               ),
 
               const SizedBox(height: 8),
 
               // Auto-check note
-              Text(
+              const Text(
                 'This page will automatically continue\nonce your email is verified.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13, height: 1.5),
+                style: AppText.authHint,
               ),
 
               const SizedBox(height: 40),
 
-              // Resend button 
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: canResend ? const Color(0xFF7DB343) : Colors.white24,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    elevation: 0,
-                  ),
-                  onPressed: canResend ? _resendEmail : null,
-                  child: _isResending
-                      ? const SizedBox(
-                          height: 20, width: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                        )
-                      : Text(
-                          // Show countdown text during cooldown, normal label otherwise
-                          _cooldownSeconds > 0
-                              ? 'Resend in ${_cooldownSeconds}s'
-                              : 'Resend Verification Email',
-                          style: const TextStyle(fontSize: 15),
-                        ),
-                ),
+              // Resend button
+              AppPillButton(
+                // Show countdown text during cooldown, normal label otherwise
+                label: _cooldownSeconds > 0
+                    ? 'Resend in ${_cooldownSeconds}s'
+                    : 'Resend Verification Email',
+                active: canResend,
+                loading: _isResending,
+                onPressed: canResend ? _resendEmail : null,
               ),
 
               const SizedBox(height: 16),
@@ -206,9 +187,9 @@ class _EmailVerificationState extends State<EmailVerification> {
               // Cancel link — signs out and returns to Login
               TextButton(
                 onPressed: _cancelAndSignOut,
-                child: Text(
+                child: const Text(
                   'Cancel and go back to Sign In',
-                  style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14),
+                  style: AppText.onDarkMuted,
                 ),
               ),
             ],

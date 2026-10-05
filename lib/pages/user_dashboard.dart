@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
+import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
+
+// Re-exported so any file that imported AppBottomNav from here keeps working.
+export 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
 import 'package:flutter_application_harbest_1/pages/user_account.dart';
 import 'package:flutter_application_harbest_1/analytics/ai_analytics.dart';
 import 'package:flutter_application_harbest_1/plant_profile/profile.dart';
@@ -23,93 +30,6 @@ class UserDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const MainNavigation();
-  }
-}
-
-class AppBottomNav extends StatelessWidget {
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-
-  const AppBottomNav({
-    super.key,
-    required this.currentIndex,
-    required this.onTap,
-  });
-
-  static const _icons = [
-    CupertinoIcons.house_fill,
-    CupertinoIcons.chart_bar_alt_fill,
-    CupertinoIcons.leaf_arrow_circlepath,
-    CupertinoIcons.create_solid,
-    CupertinoIcons.bell_fill,
-  ];
-
-  static const _labels = [
-    'Home',
-    'Analytics',
-    'My Plant',
-    'Rec.',
-    'Alerts',
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.only(
-        top: 14,
-        left: 12,
-        right: 12,
-        bottom: MediaQuery.of(context).padding.bottom + 10,
-      ),
-      decoration: const BoxDecoration(
-        color: Color(0xFF7CB342),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(30),
-          topRight: Radius.circular(30),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: List.generate(_icons.length, (i) {
-          final isSelected = currentIndex == i;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onTap(i),
-              behavior: HitTestBehavior.opaque,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? const Color(0xFF0F1F04)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(_icons[i], color: Colors.white, size: 26),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    _labels[i],
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ),
-    );
   }
 }
 
@@ -137,7 +57,7 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F2F7),
+      backgroundColor: AppColors.background,
       body: IndexedStack(index: _selectedIndex, children: _pages),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _selectedIndex,
@@ -150,22 +70,6 @@ class _MainNavigationState extends State<MainNavigation> {
 // ─────────────────────────────────────────────
 // SENSOR DEFINITIONS (used by the Sensor Overview cards)
 // ─────────────────────────────────────────────
-
-enum SensorStatus { optimal, caution, critical }
-
-extension SensorStatusX on SensorStatus {
-  String get label => switch (this) {
-        SensorStatus.optimal => 'Optimal',
-        SensorStatus.caution => 'Caution',
-        SensorStatus.critical => 'Critical',
-      };
-
-  Color get color => switch (this) {
-        SensorStatus.optimal => const Color(0xFF388E3C),
-        SensorStatus.caution => const Color(0xFFF9A825),
-        SensorStatus.critical => const Color(0xFFD32F2F),
-      };
-}
 
 class SensorDef {
   final String key;
@@ -196,42 +100,42 @@ const List<SensorDef> kSensors = [
   // Arkansas Cooperative Extension Service mustard greens fact sheet
   // (FSA-6072): pH 6.0–7.0.
   SensorDef(
-    key: 'pH', label: 'Soil pH', unit: '', icon: CupertinoIcons.lab_flask,
+    key: 'pH', label: 'Soil pH', unit: '', icon: AppIcons.soilPh,
     min: 6.0, max: 7.0, tolerance: 1.5, optimalText: '6.0 – 7.0',
   ),
   SensorDef(
-    key: 'moisture', label: 'Moisture', unit: '%', icon: CupertinoIcons.drop_fill,
+    key: 'moisture', label: 'Moisture', unit: '%', icon: AppIcons.moisture,
     min: 60, max: 80, tolerance: 30, optimalText: '60% – 80%', decimals: 0,
   ),
   SensorDef(
-    key: 'temperature', label: 'Temp', unit: '°C', icon: CupertinoIcons.thermometer,
+    key: 'temperature', label: 'Temp', unit: '°C', icon: AppIcons.temperature,
     min: 10, max: 24, tolerance: 14, optimalText: '10°C – 24°C',
   ),
   SensorDef(
-    key: 'humidity', label: 'Humidity', unit: '%', icon: CupertinoIcons.cloud_drizzle_fill,
+    key: 'humidity', label: 'Humidity', unit: '%', icon: AppIcons.humidity,
     min: 40, max: 70, tolerance: 25, optimalText: '40% – 70%', decimals: 0,
   ),
   // NOAA NWS heat index chart: "Caution" band begins at 27°C.
   SensorDef(
-    key: 'heat_index', label: 'Heat Index', unit: '°C', icon: CupertinoIcons.sun_max_fill,
+    key: 'heat_index', label: 'Heat Index', unit: '°C', icon: AppIcons.heatIndex,
     min: 0, max: 27, tolerance: 12, optimalText: 'Below 27°C',
   ),
   SensorDef(
-    key: 'EC', label: 'EC', unit: '', icon: CupertinoIcons.bolt_fill,
+    key: 'EC', label: 'EC', unit: '', icon: AppIcons.conductivity,
     min: 1.0, max: 2.5, tolerance: 1.0, optimalText: '1.0 – 2.5 mS/cm',
     decimals: 2,
   ),
   // UW–Madison Extension garden soil-test ideal ranges (N, P, K).
   SensorDef(
-    key: 'nitrogen', label: 'Nitrogen', unit: '', icon: CupertinoIcons.circle_grid_hex_fill,
+    key: 'nitrogen', label: 'Nitrogen', unit: '', icon: AppIcons.nitrogen,
     min: 5.8, max: 11.6, tolerance: 6.0, optimalText: '5.8 – 11.6 ppm',
   ),
   SensorDef(
-    key: 'phosphorus', label: 'Phosphorus', unit: '', icon: CupertinoIcons.largecircle_fill_circle,
+    key: 'phosphorus', label: 'Phosphorus', unit: '', icon: AppIcons.phosphorus,
     min: 16, max: 21, tolerance: 10, optimalText: '16 – 21 ppm',
   ),
   SensorDef(
-    key: 'potassium', label: 'Potassium', unit: '', icon: CupertinoIcons.staroflife_fill,
+    key: 'potassium', label: 'Potassium', unit: '', icon: AppIcons.potassium,
     min: 161, max: 201, tolerance: 80, optimalText: '161 – 201 ppm',
     decimals: 0,
   ),
@@ -489,12 +393,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         onTap: () {
           widget.onNavigateToProfile?.call();
         },
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color.fromARGB(255, 68, 94, 41), width: 1.5),
-          ),
+        child: AppCard(
+          radius: 20,
+          outlineColor: AppColors.darkGreen,
           padding: const EdgeInsets.all(14),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -515,11 +416,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                   Container(
                     padding: const EdgeInsets.all(5),
                     decoration: const BoxDecoration(
-                      color: Color(0xFF7CB342),
+                      color: AppColors.green,
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
-                      CupertinoIcons.chevron_right,
+                      AppIcons.forward,
                       color: Colors.white,
                       size: 12,
                     ),
@@ -559,10 +460,10 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // Optimal: inside the range. Caution: outside it, but less than halfway
   // to the tolerance limit (score >= 50). Critical: beyond that.
-  SensorStatus _statusFromScore(double score) {
-    if (score >= 100) return SensorStatus.optimal;
-    if (score >= 50) return SensorStatus.caution;
-    return SensorStatus.critical;
+  HealthLevel _statusFromScore(double score) {
+    if (score >= 100) return HealthLevel.optimal;
+    if (score >= 50) return HealthLevel.caution;
+    return HealthLevel.critical;
   }
 
   // Every sensor tracked on the dashboard, its optimal range, how far
@@ -690,13 +591,13 @@ class _DashboardScreenState extends State<DashboardScreen>
       statusColor = Colors.grey;
     } else if (score >= 75) {
       statusText = 'Healthy';
-      statusColor = const Color(0xFF2E7D32);
+      statusColor = AppColors.healthy;
     } else if (score >= 45) {
       statusText = 'Caution';
-      statusColor = const Color(0xFFF9A825);
+      statusColor = AppColors.caution;
     } else {
       statusText = 'Critical';
-      statusColor = const Color(0xFFD32F2F);
+      statusColor = AppColors.critical;
     }
 
     final alerts = _computeAlertSummary();
@@ -707,35 +608,20 @@ class _DashboardScreenState extends State<DashboardScreen>
         children: [
           // ── Crop Health (overall score ring) ──
           Expanded(
-            child: Container(
+            child: AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(
-                  color: const Color.fromARGB(255, 103, 107, 98),
-                  width: 1.5,
-                ),
-              ),
+              outlineColor: AppColors.emphasisOutline,
               child: Row(
                 children: [
-                  SizedBox(
-                    width: 62,
-                    height: 62,
-                    child: CustomPaint(
-                      painter: _HealthRingPainter(
-                        progress: score / 100,
-                        color: statusColor,
-                      ),
-                      child: Center(
-                        child: Text(
-                          hasData ? '${score.toStringAsFixed(0)}%' : '--',
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
+                  AppHealthRing(
+                    progress: score / 100,
+                    color: statusColor,
+                    child: Text(
+                      hasData ? '${score.toStringAsFixed(0)}%' : '--',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
                       ),
                     ),
                   ),
@@ -776,13 +662,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           const SizedBox(width: 12),
           // ── Active alerts ──
           Expanded(
-            child: Container(
+            child: AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: const Color.fromARGB(255, 103, 107, 98), width: 1.5),
-              ),
+              outlineColor: AppColors.emphasisOutline,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -819,45 +701,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     final Color color;
     if (critical > 0) {
       text = '$critical CRITICAL';
-      color = const Color(0xFFD32F2F);
+      color = AppColors.critical;
     } else if (total > 0) {
       text = '$total CAUTION';
-      color = const Color(0xFFF9A825);
+      color = AppColors.caution;
     } else {
       text = 'ALL CLEAR';
-      color = const Color(0xFF388E3C);
+      color = AppColors.optimal;
     }
 
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              text,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return AppStatusPill(text: text, color: color);
   }
 
   // Active alerts = sensors currently outside their optimal range, using
@@ -871,9 +724,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           _rangeScore(_sensorData[def.key], def.min, def.max, def.tolerance);
       if (score == null) continue;
       final st = _statusFromScore(score);
-      if (st == SensorStatus.optimal) continue;
+      if (st == HealthLevel.optimal) continue;
       total++;
-      if (st == SensorStatus.critical) critical++;
+      if (st == HealthLevel.critical) critical++;
     }
     return (total: total, critical: critical);
   }
@@ -894,7 +747,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(CupertinoIcons.wifi_slash, size: 52, color: Colors.grey),
+              const Icon(AppIcons.offline, size: 52, color: Colors.grey),
               const SizedBox(height: 10),
               Text(
                 _error!,
@@ -902,17 +755,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                 style: const TextStyle(color: Colors.grey, fontSize: 16),
               ),
               const SizedBox(height: 20),
-              ElevatedButton.icon(
+              AppButton(
+                label: 'Retry',
+                icon: AppIcons.refresh,
                 onPressed: () {
                   setState(() => _isLoading = true);
                   _fetchSensorData();
                 },
-                icon: const Icon(Icons.refresh),
-                label: const Text("Retry"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF7CB342),
-                  foregroundColor: Colors.white,
-                ),
               ),
             ],
           ),
@@ -950,23 +799,27 @@ class _DashboardScreenState extends State<DashboardScreen>
     final relative = _formatRelativeReading();
 
     // The whole page (green header included) lives inside one scroll
-    // view, so the header scrolls away with the content, and
-    // pull-to-refresh works from the very top.
+    // view, so the header scrolls away with the content. Standard
+    // pull-to-refresh: drag down from the top, the spinner follows your
+    // finger and drops in just below the status bar.
     return RefreshIndicator(
-      color: const Color(0xFF7CB342),
+      color: AppColors.green,
+      backgroundColor: Colors.white,
+      edgeOffset: MediaQuery.of(context).padding.top,
+      displacement: 40,
       onRefresh: _fetchSensorData,
       child: SingleChildScrollView(
-        // Always scrollable so pull-to-refresh works even when the
-        // content fits on screen (with iOS-style bounce).
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
+        // Always scrollable so pull-to-refresh also works when the
+        // content fits on screen.
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: ClampingScrollPhysics(),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // GREEN HEADER, top part: app title + account icon, greeting.
             Container(
-              color: const Color(0xFF7CB342),
+              color: AppColors.green,
               padding: const EdgeInsets.only(
                 top: 60,
                 left: 20,
@@ -978,7 +831,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 children: [
                   Row(
                     children: [
-                      const Icon(CupertinoIcons.leaf_arrow_circlepath,
+                      const Icon(AppIcons.plant,
                           color: Colors.white, size: 26),
                       const SizedBox(width: 8),
                       const Expanded(
@@ -987,7 +840,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Color.fromARGB(255, 45, 70, 14),
+                            color: AppColors.deepGreen,
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1005,7 +858,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         child: const Padding(
                           padding: EdgeInsets.all(4),
                           child: Icon(
-                            CupertinoIcons.person_crop_circle,
+                            AppIcons.account,
                             color: Colors.white,
                             size: 30,
                           ),
@@ -1020,7 +873,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: Color.fromARGB(255, 68, 94, 41),
+                      color: AppColors.darkGreen,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1029,7 +882,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const Text(
                     "Let's grow your crop!",
                     style: TextStyle(
-                      color: Color.fromARGB(255, 68, 94, 41),
+                      color: AppColors.darkGreen,
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
@@ -1050,7 +903,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   height: 1.5 + 14 + 80,
                   child: Container(
                     decoration: const BoxDecoration(
-                      color: Color(0xFF7CB342),
+                      color: AppColors.green,
                       borderRadius: BorderRadius.only(
                         bottomLeft: Radius.circular(50),
                         bottomRight: Radius.circular(50),
@@ -1072,16 +925,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const SizedBox(height: 25),
                   const Text(
                     'Sensor Overview',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.4,
-                    ),
+                    style: AppText.sectionTitle,
                   ),
                   const SizedBox(height: 2),
                   const Text(
                     'Your crop sensor readings',
-                    style: TextStyle(fontSize: 13, color: Colors.black54),
+                    style: AppText.subtitle,
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -1123,7 +972,7 @@ class SensorMiniCard extends StatelessWidget {
   final SensorDef def;
   final double? value;
   final double? score; // 0–100 closeness to the optimal range
-  final SensorStatus? status;
+  final HealthLevel? status;
   final List<double> series;
 
   const SensorMiniCard({
@@ -1142,19 +991,7 @@ class SensorMiniCard extends StatelessWidget {
         ? '--'
         : '${value!.toStringAsFixed(def.decimals)}${def.unit}';
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 10,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1172,7 +1009,7 @@ class SensorMiniCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(def.icon, size: 15, color: const Color(0xFF7CB342)),
+              Icon(def.icon, size: 15, color: AppColors.green),
             ],
           ),
           const SizedBox(height: 2),
@@ -1204,7 +1041,7 @@ class SensorMiniCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           // Percentage bar
-          _IosBar(value: (score ?? 0) / 100, color: color, height: 5),
+          AppProgressBar(value: (score ?? 0) / 100, color: color, height: 5),
           const SizedBox(height: 3),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1288,7 +1125,7 @@ class _SparklinePainter extends CustomPainter {
     // Optimal band
     canvas.drawRect(
       Rect.fromLTRB(0, yOf(optimalMax), size.width, yOf(optimalMin)),
-      Paint()..color = const Color(0xFF388E3C).withOpacity(0.12),
+      Paint()..color = AppColors.optimal.withOpacity(0.12),
     );
 
     if (values.length < 2) {
@@ -1329,91 +1166,4 @@ class _SparklinePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SparklinePainter old) =>
       old.values != values || old.color != color;
-}
-
-// Circular gauge: light track with a rounded progress arc starting at 12 o'clock.
-class _HealthRingPainter extends CustomPainter {
-  final double progress; // 0–1
-  final Color color;
-
-  _HealthRingPainter({required this.progress, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const stroke = 7.0;
-    final rect = Offset.zero & size;
-    final arcRect = rect.deflate(stroke / 2);
-
-    canvas.drawArc(
-      arcRect,
-      0,
-      6.283185307179586,
-      false,
-      Paint()
-        ..color = const Color(0xFFE5E5EA)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke,
-    );
-
-    final sweep = 6.283185307179586 * progress.clamp(0.0, 1.0);
-    if (sweep > 0) {
-      canvas.drawArc(
-        arcRect,
-        -1.5707963267948966,
-        sweep,
-        false,
-        Paint()
-          ..color = color
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..strokeCap = StrokeCap.round,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _HealthRingPainter old) =>
-      old.progress != progress || old.color != color;
-}
-
-// Slim capsule progress bar (iOS style): light track, rounded fill that
-// animates smoothly when the value changes.
-class _IosBar extends StatelessWidget {
-  final double value; // 0–1
-  final Color color;
-  final double height;
-
-  const _IosBar({
-    required this.value,
-    required this.color,
-    this.height = 5,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final fill = constraints.maxWidth * value.clamp(0.0, 1.0);
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(height / 2),
-          child: Container(
-            height: height,
-            width: double.infinity,
-            color: const Color(0xFFE5E5EA),
-            alignment: Alignment.centerLeft,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 350),
-              curve: Curves.easeOut,
-              width: fill,
-              height: height,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(height / 2),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
 }

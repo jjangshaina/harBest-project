@@ -8,6 +8,10 @@ import 'package:flutter_application_harbest_1/pages/get_started.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart';
 import 'package:flutter_application_harbest_1/security/forgot_password.dart';
 import 'package:flutter_application_harbest_1/security/email_verification.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/widgets/app_text_field.dart';
 
 class LogIn extends StatefulWidget {
   const LogIn({super.key});
@@ -24,8 +28,6 @@ class _LogInState extends State<LogIn> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  final FocusNode _emailFocus = FocusNode();
-  final FocusNode _passwordFocus = FocusNode();
 
   // Failed-login lockout, tracked per email address (not just per screen
   // visit) so guessing at one account doesn't get mixed up with a
@@ -147,8 +149,6 @@ class _LogInState extends State<LogIn> {
   @override
   void initState() {
     super.initState();
-    _emailFocus.addListener(() => setState(() {}));
-    _passwordFocus.addListener(() => setState(() {}));
     _loadLockoutState();
   }
 
@@ -156,8 +156,6 @@ class _LogInState extends State<LogIn> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _emailFocus.dispose();
-    _passwordFocus.dispose();
     _lockoutTicker?.cancel();
     super.dispose();
   }
@@ -300,15 +298,9 @@ class _LogInState extends State<LogIn> {
         return e.message ?? 'An unexpected error occurred.';
     }
   }
+  // error snackbar at the bottom of the screen (shared style)
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.redAccent.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    AppSnack.show(context, message, type: AppSnackType.error);
   }
 
   @override
@@ -316,7 +308,7 @@ class _LogInState extends State<LogIn> {
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF2D5A27),
+      backgroundColor: AppColors.authBackground,
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
@@ -333,27 +325,13 @@ class _LogInState extends State<LogIn> {
                   SizedBox(height: screenHeight * 0.015),
 
                   // Back button
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.white.withOpacity(0.9),
-                    child: IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 18),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
+                  const AppBackButton(),
 
                   const Spacer(),
 
                   // Screen title
                   const Center(
-                    child: Text(
-                      'Welcome back!',
-                      style: TextStyle(
-                        color: Colors.white, 
-                        fontSize: 28, 
-                        fontWeight: FontWeight.bold
-                      ),
-                    ),
+                    child: Text('Welcome back!', style: AppText.authTitle),
                   ),
 
                   const SizedBox(height: 8),
@@ -361,28 +339,27 @@ class _LogInState extends State<LogIn> {
                   const Center(
                     child: Text(
                       'Access your crop analytics dashboard',
-                      style: TextStyle(color: Colors.white70, fontSize: 15),
+                      style: AppText.authSubtitle,
                     ),
                   ),
 
                   SizedBox(height: screenHeight * 0.04),
 
                   // Email input field
-                  _buildTextField(
+                  AppTextField(
                     hint: 'Email Address',
                     controller: _emailController,
-                    focusNode: _emailFocus,
                     keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
                   ),
 
-                  const SizedBox(height: 12),
-
                   // Password input field
-                  _buildTextField(
+                  AppPasswordField(
                     hint: 'Password',
                     controller: _passwordController,
-                    focusNode: _passwordFocus,
-                    isPassword: true,
+                    isVisible: !_obscurePassword,
+                    onToggle: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
                   ),
 
                   const SizedBox(height: 12),
@@ -401,13 +378,7 @@ class _LogInState extends State<LogIn> {
                       ),
                       child: const Text(
                         'Forgot password?',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            decoration: TextDecoration.underline,
-                            decorationColor: Colors.white,
-                            decorationThickness: 1.5,
-                            fontWeight: FontWeight.w500),
+                        style: AppText.onDarkUnderline,
                       ),
                     ),
                   ),
@@ -415,51 +386,12 @@ class _LogInState extends State<LogIn> {
                   SizedBox(height: screenHeight * 0.03),
 
                   // Sign In button with spinner while loading
-                  Container(
-                    width: double.infinity,
-                    height: 55,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(30),
-                      gradient: const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0xFF7DB343), Color(0xFF4C7A2D)],
-                      ),
-                      boxShadow: const [BoxShadow(
-                        color: Colors.black26, 
-                        blurRadius: 10, 
-                        offset: Offset(0, 4))
-                      ],
-                    ),
-                    
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
-                      ),
-                      onPressed: (_isSubmitting || _isCurrentlyLockedOut)
-                          ? null
-                          : _onSignIn,
-                      child: _isSubmitting
-                          ? const SizedBox(
-                              height: 22, 
-                              width: 22,
-                              child: CircularProgressIndicator(
-                                color: Colors.white, 
-                                strokeWidth: 2.5),
-                            )
-                          : Text(
-                              _isCurrentlyLockedOut
-                                  ? 'Try again in ${_currentLockoutSecondsRemaining}s'
-                                  : 'Sign in',
-                              style: const TextStyle(
-                                fontSize: 18, 
-                                color: Colors.white, 
-                                fontWeight: FontWeight.w600),
-                     ),
-                    ),
+                  AppPillButton(
+                    label: _isCurrentlyLockedOut
+                        ? 'Try again in ${_currentLockoutSecondsRemaining}s'
+                        : 'Sign in',
+                    loading: _isSubmitting,
+                    onPressed: _isCurrentlyLockedOut ? null : _onSignIn,
                   ),
 
                   SizedBox(height: screenHeight * 0.025),
@@ -469,28 +401,23 @@ class _LogInState extends State<LogIn> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text(
+                        Text(
                           "Don't have an account? ",
-                          style: TextStyle(
-                            color: Colors.white, 
-                            fontWeight: FontWeight.bold, 
-                            fontSize: 13),
+                          style: AppText.onDark.copyWith(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
                         GestureDetector(
                           onTap: () => Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const GetStarted()),
+                            MaterialPageRoute(
+                              builder: (_) => const GetStarted(),
+                            ),
                           ),
-                          child: const Text(
+                          child: Text(
                             "Sign up",
-                            style: TextStyle(
-                              color: Color(0xFF7DB343), 
-                              fontWeight: FontWeight.bold, 
-                              fontSize: 13,
-                              decoration: TextDecoration.underline, 
-                              decorationColor: Color(0xFF7DB343), 
-                              decorationThickness: 1.5,
-                              ),
+                            style: AppText.onDarkLink.copyWith(fontSize: 13),
                           ),
                         ),
                       ],
@@ -505,49 +432,5 @@ class _LogInState extends State<LogIn> {
         ),
       ),
     );
-  }
-
-  Widget _buildTextField({
-    required String hint,
-    required TextEditingController controller,
-    required FocusNode focusNode,
-    bool isPassword = false,
-    TextInputType keyboardType = TextInputType.text,
-  }) {
-    final isFocused = focusNode.hasFocus;
-
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      obscureText: isPassword && _obscurePassword,
-      keyboardType: keyboardType,
-      autocorrect: false,
-      decoration: InputDecoration(
-        hintText: hint,
-        fillColor: isFocused ? Colors.white : const Color(0xFFD9D9D9), // White when focused
-        filled: true,
-        
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12), 
-          borderSide: BorderSide.none),
-
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF7DB343), width: 2), // Green border on focus
-        ),
-        contentPadding: 
-        const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-  
-        suffixIcon: isPassword
-            ? IconButton(
-                icon: Icon(
-                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                  color: Colors.black45,
-                ),
-                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-              )
-            : null,
-      ),
-    );        
   }
 }

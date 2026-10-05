@@ -3,6 +3,10 @@ import 'package:flutter_application_harbest_1/pages/log_in.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_application_harbest_1/security/email_verification.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/widgets/app_text_field.dart';
 
 // disposable/fake email domains that are not allowed
 const Set<String> _blockedDomains = {
@@ -220,33 +224,23 @@ Future<void> _onCreateAccount() async {
   }
 }
 
-  // a floating error snackbar at the bottom of the screen
+  // error snackbar at the bottom of the screen (shared style)
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.redAccent.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    AppSnack.show(context, message, type: AppSnackType.error);
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(
-      context,
-    ).size.height;
+    final screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF2D5A27), 
-      resizeToAvoidBottomInset: true, 
+      backgroundColor: AppColors.authBackground,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
-          physics: const ClampingScrollPhysics(), 
+          physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 30),
           child: ConstrainedBox(
-            
             constraints: BoxConstraints(
               minHeight: screenHeight - MediaQuery.of(context).padding.top,
             ),
@@ -257,69 +251,45 @@ Future<void> _onCreateAccount() async {
                   const SizedBox(height: 30),
 
                   // Back button — navigates to the previous screen
-                  CircleAvatar(
-                    radius: 20,
-                   
-                    backgroundColor: Colors.white.withOpacity(0.9),
-                    child: IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back_ios_new,
-                        color: Colors.black,
-                        size: 18,
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
+                  const AppBackButton(),
                   const SizedBox(height: 60),
 
-                 
                   const Center(
-                    child: Text(
-                      'Create an Account',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 30,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: Text('Create an Account', style: AppText.authTitle),
                   ),
                   const SizedBox(height: 20),
 
                   // Name input field
-                  _buildTextField(
+                  AppTextField(
                     hint: 'Full Name',
                     controller: _nameController,
+                    onChanged: (_) => setState(() {}),
                     showError: _submitAttempted && _nameController.text.isEmpty,
                     errorText: 'Full Name is required.',
                   ),
 
                   // Email input field with real-time validation feedback
-                  _buildTextField( 
+                  AppTextField(
                     hint: 'example@gmail.com',
                     controller: _emailController,
-                    keyboardType:
-                        TextInputType.emailAddress, 
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
                     showError:
                         (_emailTouched || _submitAttempted) && !_emailValid,
                     errorText: _emailError(_emailController.text),
-                    onChanged: (_) => setState(
-                      () => _emailTouched = true,
-                    ), 
-                    
-                    suffixIcon:
-                        _emailTouched && _emailController.text.isNotEmpty
-                        ? (_emailValid
-                              ? Icons.check_circle_outline
-                              : Icons.error_outline)
+                    onChanged: (_) => setState(() => _emailTouched = true),
+                    suffix: _emailTouched && _emailController.text.isNotEmpty
+                        ? Icon(
+                            _emailValid ? AppIcons.check : AppIcons.error,
+                            color: _emailValid
+                                ? AppColors.optimal
+                                : AppColors.onDarkError,
+                          )
                         : null,
-                    suffixIconColor: _emailValid
-                        ? Colors.green.shade600
-                        : Colors.redAccent,
                   ),
 
-
                   // Password input field
-                  _buildPasswordField(
+                  AppPasswordField(
                     hint: 'Password',
                     controller: _passwordController,
                     isVisible: _isPasswordVisible,
@@ -336,8 +306,7 @@ Future<void> _onCreateAccount() async {
                   if (_passwordTouched && !_allRequirementsMet)
                     _buildPasswordRequirements(),
 
-                 
-                  _buildPasswordField(
+                  AppPasswordField(
                     hint: 'Confirm Password',
                     controller: _confirmPasswordController,
                     isVisible: _isConfirmPasswordVisible,
@@ -356,18 +325,14 @@ Future<void> _onCreateAccount() async {
                   if (_confirmTouched &&
                       _confirmPasswordController.text.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(
-                        left: 4,
-                        top: 4,
-                        bottom: 4,
-                      ),
+                      padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
                       child: Row(
                         children: [
                           Icon(
-                            _passwordsMatch ? Icons.check_circle : Icons.cancel,
+                            _passwordsMatch ? AppIcons.check : AppIcons.cancel,
                             color: _passwordsMatch
-                                ? Colors.greenAccent
-                                : Colors.redAccent,
+                                ? AppColors.onDarkSuccess
+                                : AppColors.onDarkError,
                             size: 16,
                           ),
                           const SizedBox(width: 6),
@@ -377,8 +342,8 @@ Future<void> _onCreateAccount() async {
                                 : 'Passwords do not match',
                             style: TextStyle(
                               color: _passwordsMatch
-                                  ? Colors.greenAccent
-                                  : Colors.redAccent,
+                                  ? AppColors.onDarkSuccess
+                                  : AppColors.onDarkError,
                               fontSize: 13,
                             ),
                           ),
@@ -393,11 +358,9 @@ Future<void> _onCreateAccount() async {
                     children: [
                       Checkbox(
                         value: _isAgreed,
-                        onChanged: (val) => setState(
-                          () => _isAgreed = val!,
-                        ), // Toggle agreement
+                        onChanged: (val) => setState(() => _isAgreed = val!),
                         side: const BorderSide(color: Colors.white),
-                        activeColor: Colors.green,
+                        activeColor: AppColors.authAccent,
                       ),
                       const Expanded(
                         child: Text(
@@ -408,62 +371,13 @@ Future<void> _onCreateAccount() async {
                     ],
                   ),
 
-                  const Spacer(), 
-                  
-                  Container(
-                    width: double.infinity,
-                    height: 55,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(30),
-                      gradient: LinearGradient(
-                        colors: _formIsValid && !_isSubmitting
-                            ? [
-                                const Color(0xFF7DB343),
-                                const Color(0xFF4C7A2D),
-                              ] 
-                            : [
-                                Colors.grey.shade400,
-                                Colors.grey.shade600,
-                              ], 
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black26,
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            Colors.transparent, // Let gradient show through
-                        shadowColor: Colors.transparent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
-                      onPressed: _isSubmitting
-                          ? null
-                          : _onCreateAccount, // Disabled while loading
-                      
-                      child: _isSubmitting
-                          ? const SizedBox(
-                              height: 22,
-                              width: 22,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2.5,
-                              ),
-                            )
-                          : const Text(
-                              'Create Account',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
-                              ),
-                            ),
-                    ),
+                  const Spacer(),
+
+                  AppPillButton(
+                    label: 'Create Account',
+                    active: _formIsValid && !_isSubmitting,
+                    loading: _isSubmitting,
+                    onPressed: _onCreateAccount,
                   ),
 
                   const SizedBox(height: 16),
@@ -475,23 +389,14 @@ Future<void> _onCreateAccount() async {
                       children: [
                         const Text(
                           "Already have an account? ",
-                          style: TextStyle(color: Colors.white),
+                          style: AppText.onDark,
                         ),
                         GestureDetector(
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(builder: (_) => const LogIn()),
                           ),
-                          child: const Text(
-                            "Sign in",
-                            style: TextStyle(
-                              color: Color(0xFF7DB343),
-                              fontWeight: FontWeight.bold,
-                              decoration: TextDecoration.underline,
-                              decorationColor: Color( 0xFF7DB343),
-                              decorationThickness: 1.5,
-                            ),
-                          ),
+                          child: const Text("Sign in", style: AppText.onDarkLink),
                         ),
                       ],
                     ),
@@ -507,17 +412,14 @@ Future<void> _onCreateAccount() async {
     );
   }
 
-  // password requirements checklist 
+  // password requirements checklist
   Widget _buildPasswordRequirements() {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        
-        color: Colors.black.withOpacity(
-          0.25,
-        ), 
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.black.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(AppRadius.field),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -546,143 +448,19 @@ Future<void> _onCreateAccount() async {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          
           Icon(
-            isMet ? Icons.check_circle : Icons.radio_button_unchecked,
-            color: isMet ? Colors.greenAccent : Colors.white54,
+            isMet ? AppIcons.check : AppIcons.unchecked,
+            color: isMet ? AppColors.onDarkSuccess : Colors.white54,
             size: 16,
           ),
           const SizedBox(width: 8),
           Text(
             label,
             style: TextStyle(
-              color: isMet ? Colors.greenAccent : Colors.white70,
+              color: isMet ? AppColors.onDarkSuccess : Colors.white70,
               fontSize: 12,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  
-  Widget _buildTextField({
-    required String hint,
-    required TextEditingController controller,
-    IconData? suffixIcon,
-    Color? suffixIconColor,
-    bool showError = false,
-    String errorText = 'This field is required',
-    TextInputType keyboardType = TextInputType.text,
-    ValueChanged<String>? onChanged, 
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: controller,
-            keyboardType: keyboardType,
-            autocorrect: false, // Disable autocorrect for cleaner input
-            onChanged:
-                onChanged ??
-                (_) =>
-                    setState(() {}), // Rebuild on change to update error state
-            decoration: InputDecoration(
-              hintText: hint,
-              fillColor: const Color(0xFFD9D9D9), 
-              filled: true,
-              suffixIcon: suffixIcon != null
-                  ? Icon(suffixIcon, color: suffixIconColor ?? Colors.black54)
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                // Red border when there's an error, none otherwise
-                borderSide: showError
-                    ? const BorderSide(color: Colors.redAccent, width: 2)
-                    : BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 16,
-              ),
-            ),
-          ),
-          
-          if (showError)
-            Padding(
-              padding: const EdgeInsets.only(left: 8, top: 4),
-              child: Text(
-                errorText,
-                style: const TextStyle(color: Colors.redAccent, fontSize: 12),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // Reusable password field with show/hide toggle and inline error message
-  Widget _buildPasswordField({
-    required String hint,
-    required TextEditingController controller,
-    required bool isVisible, // Controls whether text is hidden
-    required VoidCallback onToggle, // Called when eye icon is tapped
-    required ValueChanged<String> onChanged,
-    bool showError = false,
-    String errorText = 'This field is required',
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: controller,
-            obscureText: !isVisible, 
-            onChanged: onChanged,
-            decoration: InputDecoration(
-              hintText: hint,
-              fillColor: const Color(0xFFD9D9D9),
-              filled: true,
-              
-              suffixIcon: IconButton(
-                icon: Icon(
-                  isVisible ? Icons.visibility : Icons.visibility_off,
-                  color: Colors.black54,
-                ),
-                onPressed: onToggle,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: showError
-                    ? const BorderSide(color: Colors.redAccent, width: 2)
-                    : BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 16,
-              ),
-            ),
-          ),
-          // Inline error message shown below the field
-          if (showError)
-            Padding(
-              padding: const EdgeInsets.only(left: 8, top: 4),
-              child: Text(
-                errorText,
-                style: const TextStyle(color: Colors.redAccent, fontSize: 12),
-              ),
-            ),
         ],
       ),
     );

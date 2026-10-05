@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
 
 class PlantImage extends StatelessWidget {
   final String? imageUrl;
@@ -52,9 +53,9 @@ class PlantImage extends StatelessWidget {
         return const Center(child: CircularProgressIndicator());
       },
       errorBuilder: (context, error, stackTrace) => Container(
-        color: Colors.black12,
+        color: AppColors.track,
         child: const Center(
-          child: Icon(Icons.image_outlined, size: 40, color: Colors.black26),
+          child: Icon(AppIcons.photo, size: 40, color: AppColors.textTertiary),
         ),
       ),
     );
@@ -131,7 +132,7 @@ class _PlantImageViewerState extends State<_PlantImageViewer> {
                       );
                     },
                     errorBuilder: (context, error, stackTrace) => const Icon(
-                      Icons.broken_image_outlined,
+                      AppIcons.photo,
                       size: 60,
                       color: Colors.white54,
                     ),
@@ -144,7 +145,7 @@ class _PlantImageViewerState extends State<_PlantImageViewer> {
             child: Align(
               alignment: Alignment.topRight,
               child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                icon: const Icon(AppIcons.close, color: Colors.white, size: 28),
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ),

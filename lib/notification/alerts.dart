@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_header.dart';
+import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 
 class AlertsPage extends StatefulWidget {
   const AlertsPage({super.key});
@@ -83,16 +87,15 @@ class _AlertsPageState extends State<AlertsPage> {
     return '${diff.inDays} day${diff.inDays == 1 ? '' : 's'} ago';
   }
 
-  
   ({IconData icon, Color color}) _severityStyle(String? severity) {
     switch (severity) {
       case 'critical':
-        return (icon: Icons.error, color: Colors.red);
+        return (icon: AppIcons.error, color: AppColors.critical);
       case 'info':
-        return (icon: Icons.info, color: Colors.blue);
+        return (icon: AppIcons.info, color: AppColors.info);
       case 'warning':
       default:
-        return (icon: Icons.warning_rounded, color: Colors.orange);
+        return (icon: AppIcons.warning, color: AppColors.caution);
     }
   }
 
@@ -100,61 +103,35 @@ class _AlertsPageState extends State<AlertsPage> {
     final style = _severityStyle(alert['severity'] as String?);
     final title = alert['title'] ?? alert['message'] ?? 'Alert';
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(style.icon, color: style.color, size: 24),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.gap),
+      child: SizedBox(
+        width: double.infinity,
+        child: AppCard(
+          padding: const EdgeInsets.all(AppSpace.cardGap),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(style.icon, color: style.color, size: 24),
+              const SizedBox(width: AppSpace.gap),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _timeAgo(alert['created_at'] as String?),
+                      style: AppText.caption.copyWith(fontSize: 12),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _timeAgo(alert['created_at'] as String?),
-                  style: const TextStyle(fontSize: 12, color: Colors.black45),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.notifications_off_rounded, size: 56, color: Colors.black26),
-            const SizedBox(height: 16),
-            const Text(
-              'No recent alerts',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Alerts will appear here once your sensors detected a problem.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.black54),
-            ),
-          ],
         ),
       ),
     );
@@ -164,47 +141,25 @@ class _AlertsPageState extends State<AlertsPage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // GREEN HEADER
-        Container(
-          padding: const EdgeInsets.only(
-            top: 60,
-            left: 20,
-            right: 20,
-            bottom: 20,
-          ),
-          decoration: const BoxDecoration(
-            color: Color(0xFF7CB342),
-            borderRadius: BorderRadius.only(
-              bottomLeft: Radius.circular(30),
-              bottomRight: Radius.circular(30),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Recent Alerts',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
+        const AppHeader(title: 'Recent Alerts'),
 
         // Body
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _alerts.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(20),
-                      itemCount: _alerts.length,
-                      itemBuilder: (context, index) => _buildAlertCard(_alerts[index]),
-                    ),
+              ? const AppEmptyState(
+                  icon: AppIcons.alertsOff,
+                  title: 'No recent alerts',
+                  message:
+                      'Alerts will appear here once your sensors detected a problem.',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(AppSpace.page),
+                  itemCount: _alerts.length,
+                  itemBuilder: (context, index) =>
+                      _buildAlertCard(_alerts[index]),
+                ),
         ),
       ],
     );

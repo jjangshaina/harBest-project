@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
+import 'package:flutter_application_harbest_1/theme/app_style.dart';
+import 'package:flutter_application_harbest_1/widgets/app_header.dart';
+import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 
 /// Represents one stage in the plant's growth cycle.
 class GrowthStage {
@@ -18,30 +22,30 @@ class GrowthStage {
 }
 
 const List<GrowthStage> kGrowthStages = [
-  GrowthStage(name: 'Germination', minDay: 0, maxDay: 7, icon: Icons.grain),
+  GrowthStage(name: 'Germination', minDay: 0, maxDay: 7, icon: AppIcons.growthGermination),
   GrowthStage(
     name: 'Seedling',
     minDay: 7,
     maxDay: 14,
-    icon: Icons.spa_outlined,
+    icon: AppIcons.growthSeedling,
   ),
   GrowthStage(
     name: 'Vegetative',
     minDay: 14,
     maxDay: 30,
-    icon: Icons.eco_outlined,
+    icon: AppIcons.growthVegetative,
   ),
   GrowthStage(
     name: 'Harvest',
     minDay: 30,
     maxDay: 50,
-    icon: Icons.agriculture_outlined,
+    icon: AppIcons.growthHarvest,
   ),
   GrowthStage(
     name: 'Bolting',
     minDay: 50,
     maxDay: 75,
-    icon: Icons.local_florist_outlined,
+    icon: AppIcons.growthBolting,
   ),
 ];
 
@@ -67,13 +71,13 @@ extension on _FactorStatus {
   Color get color {
     switch (this) {
       case _FactorStatus.optimal:
-        return const Color(0xFF4CAF50);
+        return AppColors.optimal;
       case _FactorStatus.caution:
-        return const Color(0xFFFFA726);
+        return AppColors.caution;
       case _FactorStatus.critical:
-        return const Color(0xFFE53935);
+        return AppColors.critical;
       case _FactorStatus.unknown:
-        return Colors.grey;
+        return AppColors.textTertiary;
     }
   }
 
@@ -573,15 +577,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
   Widget _buildCropImageCard() {
     final imageUrl = _latestReading?['image_url'] as String?;
-    final plantName = _plantInfo['plant_name'] ?? '';
 
     return Center(
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color.fromARGB(255, 68, 94, 41), width: 1.5),
-        ),
+      child: AppCard(
+        radius: 20,
+        outlineColor: AppColors.darkGreen,
         padding: const EdgeInsets.all(12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -615,96 +615,87 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     final boltingRisk =
         hasPlantingDate && _isBoltingRiskElevated(estimatedStageIndex);
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SizedBox(
+        width: double.infinity,
+        child: AppCard(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.timeline, color: Color(0xFF7CB342), size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Growth Stage Timeline',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          if (hasPlantingDate)
-            Text(
-              'Day $daysSincePlanting of growth',
-              style: const TextStyle(fontSize: 13, color: Colors.black54),
-            )
-          else
-            const Text(
-              'Planting date not set — add one to track progress.',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.black45,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          if (avgTemp != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              'Avg. recent temp: ${avgTemp.toStringAsFixed(1)}°C '
-              '(last ${_recentReadings.length} readings)',
-              style: const TextStyle(fontSize: 12, color: Colors.black45),
-            ),
-          ],
-          if (boltingRisk) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF3E0),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFFB74D)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(
-                    Icons.warning_amber_rounded,
-                    color: Color(0xFFEF6C00),
-                    size: 20,
-                  ),
+                  const Icon(AppIcons.timeline, color: AppColors.green, size: 20),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Elevated bolting risk — recent temperatures are running warm for '
-                      'mustard greens. Bolting may happen sooner than the day-based estimate — '
-                      'check the plant to see how it\'s actually doing.',
-                      textAlign: TextAlign.justify,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.brown.shade800,
-                      ),
-                    ),
-                  ),
+                  Text('Growth Stage Timeline', style: AppText.cardTitle),
                 ],
               ),
-            ),
-          ],
-          const SizedBox(height: 20),
-          _buildGrowthTimeline(currentStageIndex, daysSincePlanting),
-        ],
+              const SizedBox(height: 4),
+              if (hasPlantingDate)
+                Text('Day $daysSincePlanting of growth', style: AppText.subtitle)
+              else
+                Text(
+                  'Planting date not set — add one to track progress.',
+                  style: AppText.subtitle.copyWith(
+                    color: AppColors.textTertiary,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              if (avgTemp != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Avg. recent temp: ${avgTemp.toStringAsFixed(1)}°C '
+                  '(last ${_recentReadings.length} readings)',
+                  style: AppText.caption.copyWith(fontSize: 12),
+                ),
+              ],
+              if (boltingRisk) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.caution.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: AppColors.caution.withOpacity(0.5),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        AppIcons.warning,
+                        color: AppColors.caution,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Elevated bolting risk — recent temperatures are running warm for '
+                          'mustard greens. Bolting may happen sooner than the day-based estimate — '
+                          'check the plant to see how it\'s actually doing.',
+                          textAlign: TextAlign.justify,
+                          style: AppText.caption.copyWith(
+                            fontSize: 12,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              _buildGrowthTimeline(currentStageIndex, daysSincePlanting),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -718,136 +709,124 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         final isLast = index == kGrowthStages.length - 1;
 
         final Color circleColor = isCurrent
-            ? const Color(0xFF7CB342)
-            : (isPast ? const Color(0xFFA5D6A7) : Colors.grey.shade300);
+            ? AppColors.green
+            : (isPast ? AppColors.green.withOpacity(0.45) : AppColors.track);
         final Color textColor = isCurrent
-            ? const Color(0xFF33691E)
-            : (isPast ? Colors.black87 : Colors.black45);
+            ? AppColors.darkGreen
+            : (isPast ? AppColors.textPrimary : AppColors.textTertiary);
 
-        return IntrinsicHeight(
-          child: Row(
+        // A Stack (not IntrinsicHeight) so the connector line can stretch
+        // to the row's height without any intrinsic-size measuring.
+        return Stack(
+          children: [
+            if (!isLast)
+              Positioned(
+                left: 17,
+                top: 36,
+                bottom: 0,
+                width: 2,
+                child: ColoredBox(
+                  color: isPast
+                      ? AppColors.green.withOpacity(0.45)
+                      : AppColors.track,
+                ),
+              ),
+            Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                children: [
-                  InkWell(
-                    onTap: isCurrent
-                        ? () {
-                            setState(() {
-                              _expandedStageIndex = _expandedStageIndex == index
-                                  ? null
-                                  : index;
-                            });
-                          }
+              GestureDetector(
+                onTap: isCurrent
+                    ? () {
+                        setState(() {
+                          _expandedStageIndex = _expandedStageIndex == index
+                              ? null
+                              : index;
+                        });
+                      }
+                    : null,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: circleColor,
+                    shape: BoxShape.circle,
+                    border: isCurrent
+                        ? Border.all(color: AppColors.darkGreen, width: 2)
                         : null,
-                    borderRadius: BorderRadius.circular(18),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: circleColor,
-                        shape: BoxShape.circle,
-                        border: isCurrent
-                            ? Border.all(
-                                color: const Color(0xFF33691E),
-                                width: 2,
-                              )
-                            : null,
-                      ),
-                      child: Icon(
-                        stage.icon,
-                        size: 18,
-                        color: isCurrent || isPast
-                            ? Colors.white
-                            : Colors.black38,
-                      ),
-                    ),
                   ),
-                  if (!isLast)
-                    Expanded(
-                      child: Container(
-                        width: 2,
-                        color: isPast
-                            ? const Color(0xFFA5D6A7)
-                            : Colors.grey.shade300,
-                      ),
-                    ),
-                ],
+                  child: Icon(
+                    stage.icon,
+                    size: 18,
+                    color: isCurrent || isPast
+                        ? AppColors.onGreen
+                        : AppColors.textTertiary,
+                  ),
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 20),
-                  child: isCurrent
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              stage.name,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: textColor,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Day ${stage.minDay}–${stage.maxDay}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: textColor.withOpacity(0.7),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: LinearProgressIndicator(
-                                value:
-                                    ((daysSincePlanting! - stage.minDay) /
-                                            (stage.maxDay - stage.minDay))
-                                        .clamp(0.0, 1.0),
-                                minHeight: 6,
-                                backgroundColor: Colors.grey.shade200,
-                                valueColor: const AlwaysStoppedAnimation<Color>(
-                                  Color(0xFF7CB342),
-                                ),
-                              ),
-                            ),
-                            if (_expandedStageIndex == index) ...[
-                              const SizedBox(height: 10),
-                              _buildStageConditionsPanel(stage.name),
-                            ],
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              stage.name,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: textColor,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Day ${stage.minDay}–${stage.maxDay}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: textColor.withOpacity(0.7),
-                              ),
-                            ),
-                          ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        stage.name,
+                        style: AppText.body.copyWith(
+                          fontWeight: isCurrent
+                              ? FontWeight.bold
+                              : FontWeight.w600,
+                          color: textColor,
                         ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Day ${stage.minDay}–${stage.maxDay}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: textColor.withOpacity(0.7),
+                        ),
+                      ),
+                      if (isCurrent) ...[
+                        const SizedBox(height: 8),
+                        AppProgressBar(
+                          value:
+                              ((daysSincePlanting! - stage.minDay) /
+                                      (stage.maxDay - stage.minDay))
+                                  .clamp(0.0, 1.0),
+                          color: AppColors.green,
+                          height: 6,
+                        ),
+                        if (_expandedStageIndex == index) ...[
+                          const SizedBox(height: 10),
+                          _buildStageConditionsPanel(stage.name),
+                        ],
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
+          ],
         );
       }),
     );
   }
+
+  /// One factor's status tag, same look as every other status pill in the app.
+  Widget _statusPill(_FactorStatus status) => SizedBox(
+    width: _kStatusPillWidth,
+    child: Center(
+      child: AppStatusPill(text: status.label, color: status.color),
+    ),
+  );
+
+  Widget _statusDot(_FactorStatus status) => Container(
+    width: 8,
+    height: 8,
+    decoration: BoxDecoration(color: status.color, shape: BoxShape.circle),
+  );
 
   /// Optimal-conditions breakdown for one stage, checked against that
   /// stage's own target ranges. Shown when its timeline row is tapped —
@@ -868,8 +847,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F9F4),
-        borderRadius: BorderRadius.circular(12),
+        color: AppColors.rowBackground,
+        borderRadius: BorderRadius.circular(AppRadius.button),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -879,32 +858,14 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               Expanded(
                 child: Text(
                   'OPTIMAL CONDITIONS',
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.label.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF33691E),
+                    color: AppColors.darkGreen,
                   ),
                 ),
               ),
               if (score != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '$score%',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF33691E),
-                    ),
-                  ),
-                ),
+                AppStatusPill(text: '$score%', color: AppColors.optimal),
             ],
           ),
           const SizedBox(height: 2),
@@ -912,11 +873,20 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
             knownCount > 0
                 ? '$optimalCount out of $knownCount tracked factors optimal right now'
                 : 'No sensor data available yet',
-            style: const TextStyle(fontSize: 11.5, color: Colors.black45),
+            style: AppText.caption.copyWith(fontSize: 11.5),
           ),
           const SizedBox(height: 10),
           ...factors.map((factor) {
             final isLongValue = factor.name == 'N-P-K';
+            final nameStyle = AppText.label.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            );
+            final valueStyle = AppText.caption.copyWith(
+              fontSize: 11.5,
+              color: AppColors.textSecondary,
+            );
 
             if (isLongValue) {
               // NPK's value is a full sentence from nutrient_rec (e.g.
@@ -930,59 +900,17 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                   children: [
                     Row(
                       children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: factor.status.color,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
+                        _statusDot(factor.status),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            factor.name,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
+                        Expanded(child: Text(factor.name, style: nameStyle)),
                         const SizedBox(width: 8),
-                        SizedBox(
-                          width: _kStatusPillWidth,
-                          child: Container(
-                            alignment: Alignment.center,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: factor.status.color.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              factor.status.label,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: factor.status.color,
-                              ),
-                            ),
-                          ),
-                        ),
+                        _statusPill(factor.status),
                       ],
                     ),
                     const SizedBox(height: 3),
                     Padding(
                       padding: const EdgeInsets.only(left: 16),
-                      child: Text(
-                        factor.displayValue,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: Colors.black54,
-                        ),
-                      ),
+                      child: Text(factor.displayValue, style: valueStyle),
                     ),
                   ],
                 ),
@@ -993,24 +921,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: factor.status.color,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
+                  _statusDot(factor.status),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      factor.name,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+                  Expanded(child: Text(factor.name, style: nameStyle)),
                   SizedBox(
                     width: _kValueColumnWidth,
                     child: Text(
@@ -1018,35 +931,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Colors.black54,
-                      ),
+                      style: valueStyle,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  SizedBox(
-                    width: _kStatusPillWidth,
-                    child: Container(
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: factor.status.color.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        factor.status.label,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: factor.status.color,
-                        ),
-                      ),
-                    ),
-                  ),
+                  _statusPill(factor.status),
                 ],
               ),
             );
@@ -1055,18 +944,13 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                Icons.lightbulb_outline,
-                size: 14,
-                color: Color(0xFF8D6E63),
-              ),
+              const Icon(AppIcons.tip, size: 14, color: AppColors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   kStageConditions[stageName]!.npkGuidance,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF6D4C41),
+                  style: AppText.caption.copyWith(
+                    color: AppColors.textSecondary,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -1082,42 +966,14 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // GREEN HEADER
-        Container(
-          padding: const EdgeInsets.only(
-            top: 60,
-            left: 20,
-            right: 20,
-            bottom: 20,
-          ),
-          decoration: const BoxDecoration(
-            color: Color(0xFF7CB342),
-            borderRadius: BorderRadius.only(
-              bottomLeft: Radius.circular(30),
-              bottomRight: Radius.circular(30),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Plant Profile',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
+        const AppHeader(title: 'Plant Profile'),
 
         // Body
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : SingleChildScrollView(
-                  padding: const EdgeInsets.all(20.0),
+                  padding: const EdgeInsets.all(AppSpace.page),
                   child: Column(
                     children: [
                       _buildCropImageCard(),
