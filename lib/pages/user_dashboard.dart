@@ -152,7 +152,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen>
     with WidgetsBindingObserver {
-  static const int _historyLength = 20;
+  static const int _historyLength = 10;
 
   final String _uid = FirebaseAuth.instance.currentUser!.uid;
   final _supabase = Supabase.instance.client;

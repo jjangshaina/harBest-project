@@ -100,11 +100,13 @@ class _ConditionFactor {
   final String name;
   final String displayValue;
   final _FactorStatus status;
+  final IconData? icon;
 
   const _ConditionFactor({
     required this.name,
     required this.displayValue,
     required this.status,
+    this.icon,
   });
 }
 
@@ -503,7 +505,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
     return [
       _ConditionFactor(
-        name: 'pH',
+        name: 'Soil pH',
+        icon: AppIcons.soilPh,
         displayValue: ph != null ? ph.toStringAsFixed(1) : '—',
         status: ph != null
             ? _statusForValue(ranges.pH, ph)
@@ -842,6 +845,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     final knownCount = factors
         .where((f) => f.status != _FactorStatus.unknown)
         .length;
+
 
     return Container(
       width: double.infinity,

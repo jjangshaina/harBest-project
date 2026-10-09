@@ -6,19 +6,16 @@ import 'package:flutter_application_harbest_1/widgets/info_page.dart';
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Help & Support → Contact Us → Email
-const String kSupportEmail = '';
+const String kSupportEmail = 'HarBest@gmail.com';
 
 /// Help & Support → Contact Us → Call us
-const String kSupportPhone = '';
-
-/// Help & Support → Send feedback → Email
-const String kFeedbackEmail = '';
+const String kSupportPhone = '09212345678';
 
 /// Terms & Privacy → Terms & Conditions
 const List<InfoSection> kTermsSections = [
   InfoSection(
     heading: 'Terms & Conditions',
-    body: 'Add your Terms & Conditions here.',
+    body: 'TERMS & CONDITIONS FOR HarBest',
   ),
 ];
 
@@ -27,8 +24,7 @@ const List<InfoSection> kAboutSections = [
   InfoSection(
     heading: 'About HarBest',
     body:
-        'HarBest helps you monitor your mustard green crop in real time with '
-        'IoT sensors and AI-powered analytics. Add more about the project and '
-        'the team here.',
+        'HarBest helps you monitor your mustard green crop in real time with'
+        'IoT sensors and AI-powered analytics.',
   ),
 ];

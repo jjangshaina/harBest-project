@@ -208,14 +208,14 @@ class AppIcons {
   AppIcons._();
 
   // Navigation
-  static const IconData home = CupertinoIcons.house_fill;
-  static const IconData analytics = CupertinoIcons.chart_bar_alt_fill;
+  static const IconData home = CupertinoIcons.house;
+  static const IconData analytics = CupertinoIcons.chart_bar;
   static const IconData plant = CupertinoIcons.leaf_arrow_circlepath;
-  static const IconData insights = CupertinoIcons.create_solid;
-  static const IconData alerts = CupertinoIcons.bell_fill;
+  static const IconData insights = CupertinoIcons.create;
+  static const IconData alerts = CupertinoIcons.bell;
 
   // Actions
-  static const IconData back = CupertinoIcons.chevron_back;
+  static const IconData back = CupertinoIcons.chevron_left;
   static const IconData forward = CupertinoIcons.chevron_right;
   static const IconData expand = CupertinoIcons.chevron_down;
   static const IconData account = CupertinoIcons.person_crop_circle;

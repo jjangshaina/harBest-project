@@ -334,8 +334,6 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  // ── Screen ─────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -409,7 +407,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   ],
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 17),
                 AppMenuGroup(
                   children: [
                     AppMenuTile(
@@ -419,7 +417,7 @@ class _AccountScreenState extends State<AccountScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 17),
                 AppMenuGroup(
                   children: [
                     AppMenuTile(
@@ -504,7 +502,7 @@ class _AccountScreenState extends State<AccountScreen> {
             onPressed: _handleEditFullName,
             child: const Text(
               'Edit',
-              style: TextStyle(color: AppColors.deepGreen, fontSize: 14),
+              style: TextStyle(color: AppColors.green, fontSize: 14),
             ),
           ),
         ),
@@ -558,11 +556,11 @@ class _AccountScreenState extends State<AccountScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Contact Us', style: AppText.label.copyWith(color: AppColors.darkGreen)),
+        Text('Contact Us or Send Feedback', style: AppText.label.copyWith(color: AppColors.darkGreen)),
         const SizedBox(height: 10),
         _buildContactRow(
           icon: AppIcons.mail,
-          label: 'Email',
+          label: 'Email:',
           value: kSupportEmail,
           onTap: () => _openContact(
             value: kSupportEmail,
@@ -573,23 +571,11 @@ class _AccountScreenState extends State<AccountScreen> {
         const SizedBox(height: 12),
         _buildContactRow(
           icon: AppIcons.phone,
-          label: 'Call us',
+          label: 'Call us:',
           value: kSupportPhone,
           onTap: () => _openContact(value: kSupportPhone, isPhone: true),
         ),
         const SizedBox(height: 18),
-        Text('Send feedback', style: AppText.label.copyWith(color: AppColors.darkGreen)),
-        const SizedBox(height: 10),
-        _buildContactRow(
-          icon: AppIcons.feedback,
-          label: 'Email',
-          value: kFeedbackEmail,
-          onTap: () => _openContact(
-            value: kFeedbackEmail,
-            isPhone: false,
-            subject: 'HarBest feedback',
-          ),
-        ),
       ],
     );
   }
