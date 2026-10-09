@@ -33,8 +33,8 @@ class PlantImage extends StatelessWidget {
       PageRouteBuilder(
         opaque: false,
         barrierColor: Colors.black,
-        pageBuilder: (_, __, ___) => _PlantImageViewer(url: _urlToShow),
-        transitionsBuilder: (_, animation, __, child) =>
+        pageBuilder: (_, _, _) => _PlantImageViewer(url: _urlToShow),
+        transitionsBuilder: (_, animation, _, child) =>
             FadeTransition(opacity: animation, child: child),
       ),
     );

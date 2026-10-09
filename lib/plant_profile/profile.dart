@@ -432,7 +432,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   double? _getAverageRecentTemperature() {
     final temps = _recentReadings
         .map((row) => row['temperature'])
-        .where((t) => t is num)
+        .whereType<num>()
         .map((t) => (t as num).toDouble())
         .toList();
     if (temps.isEmpty) return null;

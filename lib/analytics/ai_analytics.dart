@@ -367,7 +367,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: metrics.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
                 itemBuilder: (context, i) {
                   final m = metrics[i];
                   final selected = m == _selectedMetric;
