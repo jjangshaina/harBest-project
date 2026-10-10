@@ -10,7 +10,7 @@ export 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
 import 'package:flutter_application_harbest_1/pages/user_account.dart';
 import 'package:flutter_application_harbest_1/analytics/ai_analytics.dart';
 import 'package:flutter_application_harbest_1/plant_profile/profile.dart';
-import 'package:flutter_application_harbest_1/Insights/Insights_recommendation.dart';
+import 'package:flutter_application_harbest_1/Insights/insights_recommendation.dart';
 import 'package:flutter_application_harbest_1/notification/alerts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';

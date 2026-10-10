@@ -93,6 +93,11 @@ class AppText {
     letterSpacing: 0.5,
   );
 
+  static const TextStyle headerSubtitle = TextStyle(
+  color: AppColors.onGreen,
+  fontSize: 12,
+);
+
   // Big heading of a section ("Sensor Overview")
   static const TextStyle sectionTitle = TextStyle(
     fontSize: 22,
@@ -246,9 +251,9 @@ class AppIcons {
   static const IconData growthGermination = CupertinoIcons.circle_grid_3x3_fill;
   static const IconData growthSeedling = CupertinoIcons.sunrise_fill;
   static const IconData growthVegetative = CupertinoIcons.tree;
-  static const IconData growthHarvest = CupertinoIcons.scissors;
-  static const IconData growthBolting = CupertinoIcons.sparkles;
-  static const IconData timeline = CupertinoIcons.timelapse;
+  static const IconData growthHarvest = CupertinoIcons.archivebox_fill;
+  static const IconData growthBolting = CupertinoIcons.sun_max_fill;
+  static const IconData timeline = CupertinoIcons.calendar;
   static const IconData warning = CupertinoIcons.exclamationmark_triangle_fill;
   static const IconData tip = CupertinoIcons.lightbulb;
   static const IconData alertsOff = CupertinoIcons.bell_slash_fill;

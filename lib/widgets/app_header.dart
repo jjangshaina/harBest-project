@@ -6,8 +6,12 @@ import '../theme/app_style.dart';
 ///
 /// Optional [backgroundAsset] puts a picture behind the header, tinted green
 /// so the white title stays readable.
+///
+/// Optional [subtitle] shows a small line under the title
+/// (e.g. "Updated 5 mins ago").
 class AppHeader extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final bool showBack;
   final VoidCallback? onBack;
   final Widget? trailing;
@@ -16,6 +20,7 @@ class AppHeader extends StatelessWidget {
   const AppHeader({
     super.key,
     required this.title,
+    this.subtitle,
     this.showBack = false,
     this.onBack,
     this.trailing,
@@ -54,14 +59,27 @@ class AppHeader extends StatelessWidget {
             const SizedBox(width: 16),
           ],
           Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.headerTitle,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.headerTitle,
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.headerSubtitle,
+                  ),
+              ],
             ),
           ),
-          ?trailing,
+          if (trailing != null) trailing!,
         ],
       ),
     );
@@ -87,7 +105,7 @@ class AppHeader extends StatelessWidget {
                     backgroundAsset!,
                     fit: BoxFit.cover,
                     // Falls back to plain green if the picture can't load.
-                    errorBuilder: (_, _, _) =>
+                    errorBuilder: (_, __, ___) =>
                         const ColoredBox(color: AppColors.green),
                   ),
                   ColoredBox(color: AppColors.green.withOpacity(0.55)),

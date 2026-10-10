@@ -326,10 +326,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   /// just the current one — each shows its own stage-specific targets.
   int? _expandedStageIndex;
 
-  // Mustard greens are a cool-season crop — sustained heat pushes them to
-  // bolt earlier than the day-based estimate would suggest. Threshold is in
-  // Celsius, matching the temperature column in sensor_readings.
-  static const double _boltingRiskTempC = 27.0;
   static const int _recentReadingsWindow = 5;
 
   // Fixed widths for the conditions-panel table columns, so the value and
@@ -426,31 +422,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     return kGrowthStages.length - 1;
   }
 
-  /// Average temperature across the recent sensor_readings window.
-  /// Expects a numeric 'temperature' field (Celsius). Returns null if no
-  /// readings or the field is missing/non-numeric.
-  double? _getAverageRecentTemperature() {
-    final temps = _recentReadings
-        .map((row) => row['temperature'])
-        .whereType<num>()
-        .map((t) => (t as num).toDouble())
-        .toList();
-    if (temps.isEmpty) return null;
-    return temps.reduce((a, b) => a + b) / temps.length;
-  }
-
-  /// Flags elevated bolting risk when recent average temperature is above
-  /// mustard greens' preferred range, and the plant isn't already in
-  /// (or past) the Bolting stage. Bolting is heat/day-length triggered, so
-  /// this can fire earlier than the day-based estimate would predict.
-  bool _isBoltingRiskElevated(int estimatedStageIndex) {
-    final avgTemp = _getAverageRecentTemperature();
-    if (avgTemp == null) return false;
-    final boltingStageIndex = kGrowthStages.length - 1;
-    if (estimatedStageIndex >= boltingStageIndex) return false;
-    return avgTemp >= _boltingRiskTempC;
-  }
-
   // --- Growth conditions (pH, moisture, temp, humidity, heat index, NPK) ---
 
   Map<String, dynamic>? get _latestReading =>
@@ -487,18 +458,16 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   /// Builds the six-factor breakdown for one specific stage, checked
   /// against that stage's own ideal ranges (not a single global set) —
   /// germination and bolting want different soil moisture and temperature,
-  /// for instance. Uses the latest reading for instantaneous values, plus
-  /// the recent-average temperature for consistency with the bolting-risk
-  /// check above.
+  /// for instance. Uses the latest reading for every instantaneous value.
   List<_ConditionFactor> _buildConditionFactorsForStage(String stageName) {
     final ranges = kStageConditions[stageName]!;
     final latest = _latestReading;
-    final avgTemp = _getAverageRecentTemperature();
 
     double? asDouble(dynamic v) => v is num ? v.toDouble() : null;
 
     final ph = asDouble(latest?['pH']);
     final soilMoisture = asDouble(latest?['moisture']);
+    final temperature = asDouble(latest?['temperature']);
     final humidity = asDouble(latest?['humidity']);
     final heatIndex = asDouble(latest?['heat_index']);
     final nutrientRec = latest?['nutrient_rec'] as String?;
@@ -523,9 +492,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       ),
       _ConditionFactor(
         name: 'Temperature',
-        displayValue: avgTemp != null ? '${avgTemp.toStringAsFixed(1)}°C' : '—',
-        status: avgTemp != null
-            ? _statusForValue(ranges.temperature, avgTemp)
+        displayValue: temperature != null
+            ? '${temperature.toStringAsFixed(1)}°C'
+            : '—',
+        status: temperature != null
+            ? _statusForValue(ranges.temperature, temperature)
             : _FactorStatus.unknown,
       ),
       _ConditionFactor(
@@ -608,15 +579,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   Widget _buildGrowthTimelineCard() {
     final daysSincePlanting = _getDaysSincePlanting();
     final hasPlantingDate = daysSincePlanting != null;
-    final estimatedStageIndex = hasPlantingDate
+    final currentStageIndex = hasPlantingDate
         ? _getCurrentStageIndex(daysSincePlanting)
         : -1;
-
-    final currentStageIndex = estimatedStageIndex;
-
-    final avgTemp = _getAverageRecentTemperature();
-    final boltingRisk =
-        hasPlantingDate && _isBoltingRiskElevated(estimatedStageIndex);
 
     return Padding(
       padding: const EdgeInsets.only(top: 14),
@@ -635,7 +600,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                   Text('Growth Stage Timeline', style: AppText.cardTitle),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               if (hasPlantingDate)
                 Text('Day $daysSincePlanting of growth', style: AppText.subtitle)
               else
@@ -644,56 +609,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                   style: AppText.subtitle.copyWith(
                     color: AppColors.textTertiary,
                     fontStyle: FontStyle.italic,
+                  
                   ),
                 ),
-              if (avgTemp != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  'Avg. recent temp: ${avgTemp.toStringAsFixed(1)}°C '
-                  '(last ${_recentReadings.length} readings)',
-                  style: AppText.caption.copyWith(fontSize: 12),
-                ),
-              ],
-              if (boltingRisk) ...[
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.caution.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: AppColors.caution.withOpacity(0.5),
-                    ),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(
-                        AppIcons.warning,
-                        color: AppColors.caution,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Elevated bolting risk — recent temperatures are running warm for '
-                          'mustard greens. Bolting may happen sooner than the day-based estimate — '
-                          'check the plant to see how it\'s actually doing.',
-                          textAlign: TextAlign.justify,
-                          style: AppText.caption.copyWith(
-                            fontSize: 12,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 20),
               _buildGrowthTimeline(currentStageIndex, daysSincePlanting),
             ],
@@ -735,82 +653,82 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 ),
               ),
             Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: isCurrent
-                    ? () {
-                        setState(() {
-                          _expandedStageIndex = _expandedStageIndex == index
-                              ? null
-                              : index;
-                        });
-                      }
-                    : null,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: circleColor,
-                    shape: BoxShape.circle,
-                    border: isCurrent
-                        ? Border.all(color: AppColors.darkGreen, width: 2)
-                        : null,
-                  ),
-                  child: Icon(
-                    stage.icon,
-                    size: 18,
-                    color: isCurrent || isPast
-                        ? AppColors.onGreen
-                        : AppColors.textTertiary,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: isCurrent
+                      ? () {
+                          setState(() {
+                            _expandedStageIndex = _expandedStageIndex == index
+                                ? null
+                                : index;
+                          });
+                        }
+                      : null,
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: circleColor,
+                      shape: BoxShape.circle,
+                      border: isCurrent
+                          ? Border.all(color: AppColors.darkGreen, width: 2)
+                          : null,
+                    ),
+                    child: Icon(
+                      stage.icon,
+                      size: 18,
+                      color: isCurrent || isPast
+                          ? AppColors.onGreen
+                          : AppColors.textTertiary,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        stage.name,
-                        style: AppText.body.copyWith(
-                          fontWeight: isCurrent
-                              ? FontWeight.bold
-                              : FontWeight.w600,
-                          color: textColor,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          stage.name,
+                          style: AppText.body.copyWith(
+                            fontWeight: isCurrent
+                                ? FontWeight.bold
+                                : FontWeight.w600,
+                            color: textColor,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Day ${stage.minDay}–${stage.maxDay}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: textColor.withOpacity(0.7),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Day ${stage.minDay}–${stage.maxDay}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: textColor.withOpacity(0.7),
+                          ),
                         ),
-                      ),
-                      if (isCurrent) ...[
-                        const SizedBox(height: 8),
-                        AppProgressBar(
-                          value:
-                              ((daysSincePlanting! - stage.minDay) /
-                                      (stage.maxDay - stage.minDay))
-                                  .clamp(0.0, 1.0),
-                          color: AppColors.green,
-                          height: 6,
-                        ),
-                        if (_expandedStageIndex == index) ...[
-                          const SizedBox(height: 10),
-                          _buildStageConditionsPanel(stage.name),
+                        if (isCurrent) ...[
+                          const SizedBox(height: 8),
+                          AppProgressBar(
+                            value:
+                                ((daysSincePlanting! - stage.minDay) /
+                                        (stage.maxDay - stage.minDay))
+                                    .clamp(0.0, 1.0),
+                            color: AppColors.green,
+                            height: 6,
+                          ),
+                          if (_expandedStageIndex == index) ...[
+                            const SizedBox(height: 10),
+                            _buildStageConditionsPanel(stage.name),
+                          ],
                         ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           ],
         );
       }),
@@ -832,10 +750,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   );
 
   /// Optimal-conditions breakdown for one stage, checked against that
-  /// stage's own target ranges. Shown when its timeline row is tapped —
-  /// works the same way whether it's the current stage or not, so a
-  /// grower can preview what a future stage will expect, or look back at
-  /// what an earlier one wanted.
+  /// stage's own target ranges. Shown when its timeline row is tapped.
   Widget _buildStageConditionsPanel(String stageName) {
     final factors = _buildConditionFactorsForStage(stageName);
     final score = _growthConditionsScore(factors);
@@ -845,7 +760,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     final knownCount = factors
         .where((f) => f.status != _FactorStatus.unknown)
         .length;
-
 
     return Container(
       width: double.infinity,
