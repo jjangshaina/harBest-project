@@ -16,6 +16,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
 
 import 'dart:async';
 
@@ -42,6 +43,12 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    CropService.instance.load();
+  }
 
   // No longer const — DashboardScreen now needs a callback.
   late final List<Widget> _pages = [
@@ -100,43 +107,99 @@ const List<SensorDef> kSensors = [
   // Arkansas Cooperative Extension Service mustard greens fact sheet
   // (FSA-6072): pH 6.0–7.0.
   SensorDef(
-    key: 'pH', label: 'Soil pH', unit: '', icon: AppIcons.soilPh,
-    min: 6.0, max: 7.0, tolerance: 1.5, optimalText: '6.0 – 7.0',
+    key: 'pH',
+    label: 'Soil pH',
+    unit: '',
+    icon: AppIcons.soilPh,
+    min: 6.0,
+    max: 7.0,
+    tolerance: 1.5,
+    optimalText: '6.0 – 7.0',
   ),
   SensorDef(
-    key: 'moisture', label: 'Moisture', unit: '%', icon: AppIcons.moisture,
-    min: 60, max: 80, tolerance: 30, optimalText: '60% – 80%', decimals: 0,
+    key: 'moisture',
+    label: 'Moisture',
+    unit: '%',
+    icon: AppIcons.moisture,
+    min: 60,
+    max: 80,
+    tolerance: 30,
+    optimalText: '60% – 80%',
+    decimals: 0,
   ),
   SensorDef(
-    key: 'temperature', label: 'Temp', unit: '°C', icon: AppIcons.temperature,
-    min: 10, max: 24, tolerance: 14, optimalText: '10°C – 24°C',
+    key: 'temperature',
+    label: 'Temp',
+    unit: '°C',
+    icon: AppIcons.temperature,
+    min: 10,
+    max: 24,
+    tolerance: 14,
+    optimalText: '10°C – 24°C',
   ),
   SensorDef(
-    key: 'humidity', label: 'Humidity', unit: '%', icon: AppIcons.humidity,
-    min: 40, max: 70, tolerance: 25, optimalText: '40% – 70%', decimals: 0,
+    key: 'humidity',
+    label: 'Humidity',
+    unit: '%',
+    icon: AppIcons.humidity,
+    min: 40,
+    max: 70,
+    tolerance: 25,
+    optimalText: '40% – 70%',
+    decimals: 0,
   ),
   // NOAA NWS heat index chart: "Caution" band begins at 27°C.
   SensorDef(
-    key: 'heat_index', label: 'Heat Index', unit: '°C', icon: AppIcons.heatIndex,
-    min: 0, max: 27, tolerance: 12, optimalText: 'Below 27°C',
+    key: 'heat_index',
+    label: 'Heat Index',
+    unit: '°C',
+    icon: AppIcons.heatIndex,
+    min: 0,
+    max: 27,
+    tolerance: 12,
+    optimalText: 'Below 27°C',
   ),
   SensorDef(
-    key: 'EC', label: 'EC', unit: '', icon: AppIcons.conductivity,
-    min: 1.0, max: 2.5, tolerance: 1.0, optimalText: '1.0 – 2.5 mS/cm',
-    decimals: 2,
+    key: 'EC',
+    label: 'EC',
+    unit: '',
+    icon: AppIcons.conductivity,
+    min: 1000,
+    max: 2500,
+    tolerance: 1000,
+    optimalText: '1000 – 2500 μS/cm',
+    decimals: 0,
   ),
   // UW–Madison Extension garden soil-test ideal ranges (N, P, K).
   SensorDef(
-    key: 'nitrogen', label: 'Nitrogen', unit: '', icon: AppIcons.nitrogen,
-    min: 5.8, max: 11.6, tolerance: 6.0, optimalText: '5.8 – 11.6 ppm',
+    key: 'nitrogen',
+    label: 'Nitrogen',
+    unit: '',
+    icon: AppIcons.nitrogen,
+    min: 5.8,
+    max: 11.6,
+    tolerance: 6.0,
+    optimalText: '5.8 – 11.6 ppm',
   ),
   SensorDef(
-    key: 'phosphorus', label: 'Phosphorus', unit: '', icon: AppIcons.phosphorus,
-    min: 16, max: 21, tolerance: 10, optimalText: '16 – 21 ppm',
+    key: 'phosphorus',
+    label: 'Phosphorus',
+    unit: '',
+    icon: AppIcons.phosphorus,
+    min: 16,
+    max: 21,
+    tolerance: 10,
+    optimalText: '16 – 21 ppm',
   ),
   SensorDef(
-    key: 'potassium', label: 'Potassium', unit: '', icon: AppIcons.potassium,
-    min: 161, max: 201, tolerance: 80, optimalText: '161 – 201 ppm',
+    key: 'potassium',
+    label: 'Potassium',
+    unit: '',
+    icon: AppIcons.potassium,
+    min: 161,
+    max: 201,
+    tolerance: 80,
+    optimalText: '161 – 201 ppm',
     decimals: 0,
   ),
 ];
@@ -163,7 +226,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _isLoading = true;
   String? _error;
 
-  late final RealtimeChannel _sensorChannel;
+  RealtimeChannel? _sensorChannel;
+  String? _deviceId;
+  bool _initialized = false;
 
   // Full name from the same Firestore record the My Account page edits
   // (users/{uid}.fullName). Listening to snapshots means the greeting
@@ -181,52 +246,68 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _listenToUserName();
-    _fetchSensorData();
-    _subscribeToSensor();
+    CropService.instance.addListener(_onCropChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 10),
       (_) => _fetchSensorData(),
     );
-    _relativeTimeTicker = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) {
-        if (mounted) setState(() {});
-      },
-    );
+    _relativeTimeTicker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
-  // Refresh the "time ago" text immediately when the app comes back from
-  // the background (timers can be paused/throttled while backgrounded).
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
-      setState(() {});
+  // Runs when the user's crops finish loading, or they pick another crop.
+  void _onCropChanged() {
+    if (!mounted) return;
+    final svc = CropService.instance;
+    if (!svc.loaded) return;
+    final id = svc.selected?.deviceId;
+    if (_initialized && id == _deviceId) {
+      setState(() {}); // same device, just refresh name/image
+      return;
+    }
+    _initialized = true;
+    _deviceId = id;
+    if (_sensorChannel != null) {
+      _supabase.removeChannel(_sensorChannel!);
+      _sensorChannel = null;
+    }
+    setState(() {
+      _sensorData = {};
+      _history = [];
+      _error = null;
+      _isLoading = id != null;
+    });
+    if (id != null) {
       _fetchSensorData();
+      _subscribeToSensor(id);
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    CropService.instance.removeListener(_onCropChanged);
     _refreshTimer?.cancel();
     _relativeTimeTicker?.cancel();
     _nameSub?.cancel();
-    _supabase.removeChannel(_sensorChannel);
+    if (_sensorChannel != null) _supabase.removeChannel(_sensorChannel!);
     super.dispose();
   }
 
-  // Fetches the latest N rows: the newest is the current reading, the
-  // rest feed the mini charts.
   Future<void> _fetchSensorData() async {
+    final deviceId = _deviceId;
+    if (deviceId == null) return;
     try {
       final response = await _supabase
           .from('sensor_readings')
           .select()
-          .order('id', ascending: false)
+          .eq('device_id', deviceId)
+          .order('timestamp', ascending: false)
           .limit(_historyLength);
 
-      debugPrint("Raw response: $response");
-      if (!mounted) return;
+      if (!mounted || deviceId != _deviceId) return; // crop switched meanwhile
 
       final rows = List<Map<String, dynamic>>.from(
         (response as List).map((e) => Map<String, dynamic>.from(e)),
@@ -234,7 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       if (rows.isEmpty) {
         setState(() {
-          _error = "No sensor data found. Start your Raspberry Pi!";
+          _error = "No sensor data found for this crop yet.";
           _isLoading = false;
         });
         return;
@@ -249,22 +330,26 @@ class _DashboardScreenState extends State<DashboardScreen>
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = "No sensor data found. Start your Raspberry Pi!";
+        _error = "Couldn't load sensor data. Check your connection.";
         _isLoading = false;
       });
       debugPrint("Supabase fetch error: $e");
     }
   }
 
-  void _subscribeToSensor() {
+  void _subscribeToSensor(String deviceId) {
     _sensorChannel = _supabase
-        .channel('sensor_readings_channel')
+        .channel('sensor_readings_$deviceId')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'sensor_readings',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'device_id',
+            value: deviceId,
+          ),
           callback: (payload) {
-            debugPrint("Supabase live update: ${payload.newRecord}");
             if (!mounted) return;
             final row = Map<String, dynamic>.from(payload.newRecord);
             setState(() {
@@ -277,10 +362,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             });
           },
         )
-        .subscribe((status, [error]) {
-          debugPrint("Realtime status: $status");
-          if (error != null) debugPrint("Realtime error: $error");
-        });
+        .subscribe();
   }
 
   // ── LAST READING TIMESTAMP ──
@@ -318,8 +400,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   DateTime? _lastReadingAsLocal() {
     final utc = _lastReadingDateTime();
     if (utc == null) return null;
-    return DateTime(utc.year, utc.month, utc.day, utc.hour, utc.minute,
-        utc.second);
+    return DateTime(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
   }
 
   String _formatRelativeReading() {
@@ -358,9 +446,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         .doc(_uid)
         .snapshots()
         .listen((doc) {
-      final name = (doc.data()?['fullName'] as String?)?.trim() ?? '';
-      if (mounted && name != _fullName) setState(() => _fullName = name);
-    }, onError: (e) => debugPrint('Name listener error: $e'));
+          final name = (doc.data()?['fullName'] as String?)?.trim() ?? '';
+          if (mounted && name != _fullName) setState(() => _fullName = name);
+        }, onError: (e) => debugPrint('Name listener error: $e'));
   }
 
   // First name for the greeting: first word of the Firestore fullName,
@@ -385,8 +473,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildCropImageCard() {
-    final imageUrl = _sensorData['image_url'] as String?;
-    final plantName = _sensorData['plant_name'] ?? 'Mustard Green';
+    final crop = CropService.instance.selected;
+    final imageUrl = crop?.imageUrl ?? _sensorData['image_url'] as String?;
+    final plantName = crop?.name ?? 'Mustard Green';
 
     return Center(
       child: GestureDetector(
@@ -477,10 +566,34 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ratios between them matter.
   static const List<Map<String, dynamic>> _sensorScoreConfig = [
     {'key': 'pH', 'min': 6.0, 'max': 7.0, 'tolerance': 1.5, 'weight': 0.20},
-    {'key': 'moisture', 'min': 60.0, 'max': 80.0, 'tolerance': 30.0, 'weight': 0.25},
-    {'key': 'temperature', 'min': 10.0, 'max': 24.0, 'tolerance': 14.0, 'weight': 0.15},
-    {'key': 'humidity', 'min': 40.0, 'max': 70.0, 'tolerance': 25.0, 'weight': 0.10},
-    {'key': 'heat_index', 'min': 0.0, 'max': 27.0, 'tolerance': 12.0, 'weight': 0.05},
+    {
+      'key': 'moisture',
+      'min': 60.0,
+      'max': 80.0,
+      'tolerance': 30.0,
+      'weight': 0.25,
+    },
+    {
+      'key': 'temperature',
+      'min': 10.0,
+      'max': 24.0,
+      'tolerance': 14.0,
+      'weight': 0.15,
+    },
+    {
+      'key': 'humidity',
+      'min': 40.0,
+      'max': 70.0,
+      'tolerance': 25.0,
+      'weight': 0.10,
+    },
+    {
+      'key': 'heat_index',
+      'min': 0.0,
+      'max': 27.0,
+      'tolerance': 12.0,
+      'weight': 0.05,
+    },
   ];
 
   // Nitrogen, phosphorus and potassium are folded into one combined
@@ -549,12 +662,14 @@ class _DashboardScreenState extends State<DashboardScreen>
     // Average the three NPK readings into one combined score, then
     // fold that in as a single weighted factor.
     final npkScores = _npkScoreConfig
-        .map((cfg) => _rangeScore(
-              _sensorData[cfg['key']],
-              cfg['min'] as double,
-              cfg['max'] as double,
-              cfg['tolerance'] as double,
-            ))
+        .map(
+          (cfg) => _rangeScore(
+            _sensorData[cfg['key']],
+            cfg['min'] as double,
+            cfg['max'] as double,
+            cfg['tolerance'] as double,
+          ),
+        )
         .whereType<double>()
         .toList();
     if (npkScores.isNotEmpty) {
@@ -563,8 +678,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       weightTotal += _npkWeight;
     }
 
-    final double? sensorScore =
-        weightTotal == 0 ? null : weightedSum / weightTotal;
+    final double? sensorScore = weightTotal == 0
+        ? null
+        : weightedSum / weightTotal;
 
     final double? cropScore = _cropHealthScore();
 
@@ -582,7 +698,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ring gauge, next to an "Active alerts" card.
   Widget _buildTopInsightCards() {
     final bool hasData = _sensorData.isNotEmpty;
-    final double score = hasData ? _computeOverallHealthScore().clamp(0, 100) : 0;
+    final double score = hasData
+        ? _computeOverallHealthScore().clamp(0, 100)
+        : 0;
 
     final String statusText;
     final Color statusColor;
@@ -720,8 +838,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     int total = 0;
     int critical = 0;
     for (final def in kSensors) {
-      final score =
-          _rangeScore(_sensorData[def.key], def.min, def.max, def.tolerance);
+      final score = _rangeScore(
+        _sensorData[def.key],
+        def.min,
+        def.max,
+        def.tolerance,
+      );
       if (score == null) continue;
       final st = _statusFromScore(score);
       if (st == HealthLevel.optimal) continue;
@@ -733,12 +855,18 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // ── SENSOR OVERVIEW GRID (mini charts + range status bars) ──
   Widget _buildSensorGrid() {
-    if (_isLoading) {
-      return const SizedBox(
-        height: 200,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
+    if (CropService.instance.loaded && CropService.instance.selected == null) {
+  return const SizedBox(
+    height: 200,
+    child: Center(
+      child: Text(
+        'No crop is linked to your account yet.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Colors.grey, fontSize: 16),
+      ),
+    ),
+  );
+}
 
     if (_error != null) {
       return SizedBox(
@@ -779,7 +907,11 @@ class _DashboardScreenState extends State<DashboardScreen>
       childAspectRatio: 0.7,
       children: kSensors.map((def) {
         final score = _rangeScore(
-            _sensorData[def.key], def.min, def.max, def.tolerance);
+          _sensorData[def.key],
+          def.min,
+          def.max,
+          def.tolerance,
+        );
         return SensorMiniCard(
           def: def,
           value: _parseNum(_sensorData[def.key]),
@@ -831,8 +963,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 children: [
                   Row(
                     children: [
-                      const Icon(AppIcons.plant,
-                          color: Colors.white, size: 26),
+                      const Icon(AppIcons.plant, color: Colors.white, size: 26),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text(
@@ -851,7 +982,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (_) => const UserAccount()),
+                              builder: (_) => const UserAccount(),
+                            ),
                           );
                         },
                         behavior: HitTestBehavior.opaque,
@@ -923,10 +1055,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 children: [
                   _buildTopInsightCards(),
                   const SizedBox(height: 25),
-                  const Text(
-                    'Sensor Overview',
-                    style: AppText.sectionTitle,
-                  ),
+                  const Text('Sensor Overview', style: AppText.sectionTitle),
                   const SizedBox(height: 2),
                   const Text(
                     'Your crop sensor readings',
@@ -1130,7 +1259,10 @@ class _SparklinePainter extends CustomPainter {
 
     if (values.length < 2) {
       canvas.drawCircle(
-          Offset(size.width / 2, yOf(values.first)), 2.5, Paint()..color = color);
+        Offset(size.width / 2, yOf(values.first)),
+        2.5,
+        Paint()..color = color,
+      );
       return;
     }
 

@@ -1,1 +1,55 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"harbest-mustardgreenanalytics","appId":"1:873397291520:android:a186f19afb8bbcc11d66e5","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"harbest-mustardgreenanalytics","configurations":{"android":"1:873397291520:android:a186f19afb8bbcc11d66e5","ios":"1:873397291520:ios:34e87955e31599a41d66e5","macos":"1:873397291520:ios:34e87955e31599a41d66e5","web":"1:873397291520:web:4cd2f258821682eb1d66e5","windows":"1:873397291520:web:c1d1bce19d398ccf1d66e5"}}}}}}
+{
+  "project_info": {
+    "project_number": "873397291520",
+    "firebase_url": "https://harbest-mustardgreenanalytics-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "harbest-mustardgreenanalytics",
+    "storage_bucket": "harbest-mustardgreenanalytics.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:873397291520:android:a186f19afb8bbcc11d66e5",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_harbest_1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "873397291520-cjjupmd9uvdaqi58lvcno3esgknv4m1j.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.flutter_application_harbest_1",
+            "certificate_hash": "762c6634f8d9f524f297954b874ff0bbd5bd05be"
+          }
+        },
+        {
+          "client_id": "873397291520-db0e3s3rib73tlt3c7be4jtjhd27qq2m.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWlP4irI-nu2Vi5WxiBKNNRsHlWSwdsyE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "873397291520-db0e3s3rib73tlt3c7be4jtjhd27qq2m.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "873397291520-jr99gs9i6qt20gav3brtqea5gk70924l.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.flutterApplicationHarbest1"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

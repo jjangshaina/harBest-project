@@ -13,6 +13,7 @@ import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_dialogs.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
 
 // Plain widget now, not its own MaterialApp — relies on the single root
 // MaterialApp defined in main.dart.
@@ -254,7 +255,7 @@ class _AccountScreenState extends State<AccountScreen> {
       // authStateChanges() and routes back to the Welcome screen on its
       // own — no separate local "logged in" flag to clear.
       await FirebaseAuth.instance.signOut();
-
+      CropService.instance.clear(); 
       if (!mounted) return;
 
       // Navigate to Harbest welcome screen and remove all previous routes to prevent back navigation
@@ -268,6 +269,8 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _handleDeleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) return;
+
+    
 
     final confirmed = await AppDialog.confirm(
       context,

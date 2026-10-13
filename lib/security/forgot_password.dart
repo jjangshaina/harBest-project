@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-import 'package:flutter_application_harbest_1/widgets/app_button.dart';
-import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_text_field.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 
 class ForgotPassword extends StatefulWidget {
   const ForgotPassword({super.key, this.initialEmail});
@@ -94,53 +94,33 @@ class _ForgotPasswordState extends State<ForgotPassword> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      body: Column(
+    return AuthScaffold(
+      showBrand: false,
+      centerHeader: true,
+      subtitleAlign: TextAlign.justify,
+      subtitleSize: 12,
+      topGap: MediaQuery.of(context).size.height * 0.1,
+      title: 'Reset your password',
+      subtitle: "Enter the email address associated with your account "
+          "and we'll send you an email to reset your password.",
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppHeader(title: 'Reset your password', showBack: true),
+          AuthField(
+            label: 'Email address',
+            hint: 'name@example.com',
+            icon: AppIcons.mail,
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+          ),
 
-          // Body — text and field scroll if needed, button always pinned
-          // to the bottom of the screen.
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 44, 24, 24),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      physics: const ClampingScrollPhysics(),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Enter the email address associated with your account "
-                            "and we'll send you an email to reset your password.",
-                            textAlign: TextAlign.justify,
-                            style: AppText.body.copyWith(height: 1.5),
-                          ),
-                          const SizedBox(height: 18),
-                          AppTextField(
-                            hint: 'Email Address',
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            autocorrect: false,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+          const SizedBox(height: 14),
 
-                  // Reset password button, anchored at the bottom
-                  AppButton(
-                    label: 'Reset password',
-                    expanded: true,
-                    loading: _isSending,
-                    onPressed: _onResetPassword,
-                  ),
-                ],
-              ),
-            ),
+          AuthPrimaryButton(
+            label: 'Reset password',
+            loading: _isSending,
+            onPressed: _onResetPassword,
           ),
         ],
       ),

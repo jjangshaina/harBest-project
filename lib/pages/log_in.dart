@@ -9,9 +9,10 @@ import 'package:flutter_application_harbest_1/pages/user_dashboard.dart';
 import 'package:flutter_application_harbest_1/security/forgot_password.dart';
 import 'package:flutter_application_harbest_1/security/email_verification.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_text_field.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 
 class LogIn extends StatefulWidget {
   const LogIn({super.key});
@@ -22,26 +23,15 @@ class LogIn extends StatefulWidget {
 
 class _LogInState extends State<LogIn> {
   bool _obscurePassword = true;
-  bool _isSubmitting = false; // True while Firebase sign-in request is in progress
+  bool _isSubmitting = false;
 
-  // Controllers to read email and password input values
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-
-  // Failed-login lockout, tracked per email address (not just per screen
-  // visit) so guessing at one account doesn't get mixed up with a
-  // separate attempt on a different one. This is a client-side UX layer
-  // only — it discourages fat-fingered retries through this screen, but
-  // can't stop someone hitting Firebase's API directly. Firebase Auth's
-  // own automatic throttling (the 'too-many-requests' error already
-  // handled below) is the real backend-level protection underneath it.
-  //
-  // Persisted to local device storage (SharedPreferences) so a closed or
-  // restarted app doesn't reset the count — only a genuinely expired
-  // lockout or a successful login clears it. Uninstalling the app still
-  // clears this data (SharedPreferences isn't Keychain-backed), so it
-  // doesn't carry the reinstall-survival quirk the old StoringData had.
+  // Failed-login lockout, tracked per email address. Client-side UX layer
+  // only; Firebase's own 'too-many-requests' throttling is the real
+  // backend protection. Persisted via SharedPreferences so a restart
+  // doesn't reset the count.
   static const int _maxLoginAttempts = 3;
   static const int _lockoutDurationSeconds = 30;
   static const String _lockoutPrefsKey = 'login_lockout_state_v1';
@@ -61,9 +51,6 @@ class _LogInState extends State<LogIn> {
 
   bool get _isCurrentlyLockedOut => _currentLockoutSecondsRemaining > 0;
 
-  // Loads any lockout/attempt state saved from a previous app session.
-  // Expired lockouts are dropped rather than restored, so an old lockout
-  // that already ran out while the app was closed doesn't linger.
   Future<void> _loadLockoutState() async {
     final prefs = await SharedPreferences.getInstance();
     _prefs = prefs;
@@ -85,7 +72,6 @@ class _LogInState extends State<LogIn> {
           if (lockedUntil.isAfter(now)) {
             _lockedUntilByEmail[email] = lockedUntil;
           }
-          // Already expired while the app was closed — don't restore it.
         } else {
           final attempts = data['attempts'] as int? ?? 0;
           if (attempts > 0) _failedAttemptsByEmail[email] = attempts;
@@ -100,8 +86,6 @@ class _LogInState extends State<LogIn> {
     if (_lockedUntilByEmail.isNotEmpty) _startLockoutTicker();
   }
 
-  // Writes the current attempt/lockout state to disk so it survives an
-  // app restart. Called after every change to either map.
   Future<void> _persistLockoutState() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     _prefs = prefs;
@@ -162,14 +146,12 @@ class _LogInState extends State<LogIn> {
 
   // handling sign in button tap
   Future<void> _onSignIn() async {
-    // Empty field validation
     if (_emailController.text.trim().isEmpty ||
         _passwordController.text.isEmpty) {
       _showSnackBar('Please enter your email and password.');
       return;
     }
 
-    // Locked out after too many failed attempts for this email
     if (_isCurrentlyLockedOut) {
       _showSnackBar(
         'Too many failed attempts. Please try again in '
@@ -181,7 +163,6 @@ class _LogInState extends State<LogIn> {
     setState(() => _isSubmitting = true);
 
     try {
-      // Attempt to sign in with Firebase Authentication
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -194,11 +175,7 @@ class _LogInState extends State<LogIn> {
 
       final user = FirebaseAuth.instance.currentUser;
 
-      // If the user hasn't verified their email yet, send them to the
-      // dedicated verification screen instead of signing them back out.
-      // It keeps them signed in, polls for verification automatically,
-      // and offers Resend from one consistent place — the same screen
-      // used right after signup.
+      // Unverified users go to the verification screen (stay signed in).
       if (user != null && !user.emailVerified) {
         if (!mounted) return;
         Navigator.pushAndRemoveUntil(
@@ -206,14 +183,10 @@ class _LogInState extends State<LogIn> {
           MaterialPageRoute(builder: (_) => const EmailVerification()),
           (_) => false,
         );
-        return; // Stop further execution since email is not verified
+        return;
       }
 
-      // At this point the user is signed in and verified. Keep Firestore's
-      // isVerified field in sync with the real Firebase Auth status —
-      // this is the only place that ever gets a chance to flip it from
-      // false to true after signup, so accounts don't stay stuck with a
-      // stale/incorrect value forever.
+      // Keep Firestore's isVerified in sync with the real Auth status.
       if (user != null) {
         try {
           await FirebaseFirestore.instance
@@ -221,30 +194,25 @@ class _LogInState extends State<LogIn> {
               .doc(user.uid)
               .set({'isVerified': true}, SetOptions(merge: true));
         } catch (_) {
-          // Non-critical: don't block sign-in if this sync fails (e.g.
-          // transient network issue). The account page will retry this
-          // same sync the next time it loads.
+          // Non-critical; the account page retries this sync on load.
         }
       }
 
-      // Firebase Auth persists the signed-in session on its own, so no
-      // separate "remember me" flag is needed here — AuthGate in main.dart
-      // reads the real session via authStateChanges() on next launch.
-
       if (!mounted) return;
-      // Navigate to Dashboard                                                                
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => UserDashboard()), 
+        MaterialPageRoute(builder: (_) => const UserDashboard()),
         (_) => false,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      // Only count actual wrong-credential attempts toward the lockout —
-      // not network errors, disabled accounts, or Firebase's own
-      // too-many-requests throttling (that's already a lockout in itself).
-      const mismatchCodes = {'wrong-password', 'invalid-credential', 'user-not-found'};
+      // Only real wrong-credential attempts count toward the lockout.
+      const mismatchCodes = {
+        'wrong-password',
+        'invalid-credential',
+        'user-not-found',
+      };
       if (mismatchCodes.contains(e.code)) {
         final attempts = (_failedAttemptsByEmail[_emailKey] ?? 0) + 1;
 
@@ -269,7 +237,7 @@ class _LogInState extends State<LogIn> {
           );
         }
       } else {
-        _showSnackBar(_mapFirebaseError(e)); // Show error message
+        _showSnackBar(_mapFirebaseError(e));
       }
     } catch (_) {
       if (!mounted) return;
@@ -279,7 +247,7 @@ class _LogInState extends State<LogIn> {
     }
   }
 
-  // firebase auth error
+
   String _mapFirebaseError(FirebaseAuthException e) {
     switch (e.code) {
       case 'user-not-found':
@@ -298,138 +266,96 @@ class _LogInState extends State<LogIn> {
         return e.message ?? 'An unexpected error occurred.';
     }
   }
-  // error snackbar at the bottom of the screen (shared style)
+
   void _showSnackBar(String message) {
     AppSnack.show(context, message, type: AppSnackType.error);
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
+    final locked = _isCurrentlyLockedOut;
 
-    return Scaffold(
-      backgroundColor: AppColors.authBackground,
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const ClampingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 30),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: screenHeight - MediaQuery.of(context).padding.top,
-            ),
-            child: IntrinsicHeight(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(height: screenHeight * 0.015),
+    return AuthScaffold(
+      // Same vertical level and centered heading as the previous design:
+      // title sits about a third of the way down the screen.
+      showBrand: false,
+      topGap: MediaQuery.of(context).size.height * 0.22,
+      centerHeader: true,
+      title: 'Welcome back!',
+      subtitle: 'Log in to access your crop analytics dashboard',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AuthField(
+            label: 'Email address',
+            hint: 'name@example.com',
+            icon: AppIcons.mail,
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            // Lockout is per email, so refresh the button when it changes.
+            onChanged: (_) => setState(() {}),
+          ),
 
-                  // Back button
-                  const AppBackButton(),
+          AuthPasswordField(
+            label: 'Password',
+            hint: 'Enter your password',
+            controller: _passwordController,
+            isVisible: !_obscurePassword,
+            onToggle: () =>
+                setState(() => _obscurePassword = !_obscurePassword),
+          ),
 
-                  const Spacer(),
-
-                  // Screen title
-                  const Center(
-                    child: Text('Welcome back!', style: AppText.authTitle),
+          // Forgot password link, right-aligned under the password field
+          Align(
+            alignment: Alignment.centerRight,
+            child: GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      ForgotPassword(initialEmail: _emailController.text),
+                ),
+              ),
+              behavior: HitTestBehavior.opaque,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  'Forgot password?',
+                  style: TextStyle(
+                    color: AppColors.darkGreen,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.underline,
+                    decorationColor: AppColors.darkGreen,
                   ),
-
-                  const SizedBox(height: 8),
-
-                  const Center(
-                    child: Text(
-                      'Access your crop analytics dashboard',
-                      style: AppText.authSubtitle,
-                    ),
-                  ),
-
-                  SizedBox(height: screenHeight * 0.04),
-
-                  // Email input field
-                  AppTextField(
-                    hint: 'Email Address',
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                  ),
-
-                  // Password input field
-                  AppPasswordField(
-                    hint: 'Password',
-                    controller: _passwordController,
-                    isVisible: !_obscurePassword,
-                    onToggle: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // Forgot Password link
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ForgotPassword(
-                            initialEmail: _emailController.text,
-                          ),
-                        ),
-                      ),
-                      child: const Text(
-                        'Forgot password?',
-                        style: AppText.onDarkUnderline,
-                      ),
-                    ),
-                  ),
-
-                  SizedBox(height: screenHeight * 0.03),
-
-                  // Sign In button with spinner while loading
-                  AppPillButton(
-                    label: _isCurrentlyLockedOut
-                        ? 'Try again in ${_currentLockoutSecondsRemaining}s'
-                        : 'Sign in',
-                    loading: _isSubmitting,
-                    onPressed: _isCurrentlyLockedOut ? null : _onSignIn,
-                  ),
-
-                  SizedBox(height: screenHeight * 0.025),
-
-                  // Sign Up link for users without an account
-                  Center(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          "Don't have an account? ",
-                          style: AppText.onDark.copyWith(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GetStarted(),
-                            ),
-                          ),
-                          child: Text(
-                            "Sign up",
-                            style: AppText.onDarkLink.copyWith(fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const Spacer(),
-                ],
+                ),
               ),
             ),
           ),
-        ),
+
+          const SizedBox(height: 24),
+
+          AuthPrimaryButton(
+            label: locked
+                ? 'Try again in ${_currentLockoutSecondsRemaining}s'
+                : 'Sign in',
+            active: !locked,
+            loading: _isSubmitting,
+            onPressed: locked ? null : _onSignIn,
+          ),
+
+          const SizedBox(height: 28),
+
+          AuthFooterLink(
+            prompt: "Don't have an account?",
+            linkText: 'Create account',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const GetStarted()),
+            ),
+          ),
+        ],
       ),
     );
   }
