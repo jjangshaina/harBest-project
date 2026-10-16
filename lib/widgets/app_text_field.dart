@@ -202,3 +202,153 @@ class AppFormField extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// AUTH PAGES: labeled fields for the white card
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Labeled text field with a leading icon, for the white auth card.
+class AuthField extends StatelessWidget {
+  final String label;
+  final String hint;
+  final IconData icon;
+  final TextEditingController controller;
+  final TextInputType keyboardType;
+  final ValueChanged<String>? onChanged;
+  final bool obscureText;
+  final bool autocorrect;
+  final bool showError;
+  final String errorText;
+  final String? helperText;
+  final Widget? suffix;
+
+  const AuthField({
+    super.key,
+    required this.label,
+    required this.hint,
+    required this.icon,
+    required this.controller,
+    this.keyboardType = TextInputType.text,
+    this.onChanged,
+    this.obscureText = false,
+    this.autocorrect = true,
+    this.showError = false,
+    this.errorText = 'This field is required',
+    this.helperText,
+    this.suffix,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(AppRadius.field);
+    OutlineInputBorder border(Color c, double w) => OutlineInputBorder(
+          borderRadius: radius,
+          borderSide: BorderSide(color: c, width: w),
+        );
+    final idle = showError ? AppColors.critical : AppColors.darkGreen;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: AppText.body.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            obscureText: obscureText,
+            autocorrect: autocorrect,
+            onChanged: onChanged,
+            style: AppText.body,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: AppText.body.copyWith(color: AppColors.textTertiary),
+              filled: true,
+              fillColor: Colors.white,
+              prefixIcon: Icon(icon, size: 20, color: AppColors.darkGreen),
+              suffixIcon: suffix,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+              border: border(idle, 1.2),
+              enabledBorder: border(idle, 1.2),
+              focusedBorder:
+                  border(showError ? AppColors.critical : AppColors.green, 2),
+            ),
+          ),
+          if (showError)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 4),
+              child: Text(
+                errorText,
+                style: const TextStyle(
+                  color: AppColors.critical,
+                  fontSize: 12,
+                ),
+              ),
+            )
+          else if (helperText != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 4),
+              child: Text(helperText!, style: AppText.caption),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// [AuthField] with the show / hide eye button.
+class AuthPasswordField extends StatelessWidget {
+  final String label;
+  final String hint;
+  final TextEditingController controller;
+  final bool isVisible;
+  final VoidCallback onToggle;
+  final ValueChanged<String>? onChanged;
+  final bool showError;
+  final String errorText;
+  final String? helperText;
+
+  const AuthPasswordField({
+    super.key,
+    required this.label,
+    required this.hint,
+    required this.controller,
+    required this.isVisible,
+    required this.onToggle,
+    this.onChanged,
+    this.showError = false,
+    this.errorText = 'This field is required',
+    this.helperText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AuthField(
+      label: label,
+      hint: hint,
+      icon: AppIcons.lock,
+      controller: controller,
+      obscureText: !isVisible,
+      onChanged: onChanged,
+      showError: showError,
+      errorText: errorText,
+      helperText: helperText,
+      suffix: IconButton(
+        icon: Icon(
+          isVisible ? AppIcons.visible : AppIcons.hidden,
+          color: AppColors.textPrimary,
+          size: 22,
+        ),
+        onPressed: onToggle,
+      ),
+    );
+  }
+}

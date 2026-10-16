@@ -58,7 +58,7 @@ class AppColors {
 class AppRadius {
   AppRadius._();
   static const double card = 16;
-  static const double button = 12;
+  static const double button = 30;
   static const double field = 12;
   static const double dialog = 20;
   static const double header = 30;
@@ -201,7 +201,7 @@ class AppText {
   );
 
   static const TextStyle button = TextStyle(
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: FontWeight.w600,
   );
 }
@@ -267,6 +267,7 @@ class AppIcons {
   static const IconData emailUnread = CupertinoIcons.envelope_badge;
   static const IconData photo = CupertinoIcons.photo;
   static const IconData close = CupertinoIcons.xmark;
+  static const IconData person = CupertinoIcons.person;
 
   // account page
   static const IconData profile = CupertinoIcons.person_fill;

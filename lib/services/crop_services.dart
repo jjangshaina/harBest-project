@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class Crop {
-  final String id, deviceId, name, cropType;
+  final String id, deviceId, ownerUid, name, cropType;
   final int slot;
   final DateTime? plantingDate;
   final String? imageUrl;
@@ -11,6 +12,7 @@ class Crop {
   Crop.fromMap(Map<String, dynamic> m)
       : id = m['crop_id'] as String,
         deviceId = m['device_id'] as String,
+        ownerUid = (m['owner_uid'] as String?) ?? '',
         name = (m['name'] as String?) ?? 'My crop',
         cropType = (m['crop_type'] as String?) ?? 'Mustard Green',
         slot = (m['slot'] as int?) ?? 1,
@@ -18,11 +20,12 @@ class Crop {
         plantingDate = DateTime.tryParse('${m['planting_date']}');
 }
 
-/// Holds the signed-in user's crops. Pages read from here instead of
-/// querying Supabase globally.
+/// Holds the crops the signed-in user may see (their own, or all of them for
+/// an admin account; the database decides).
 class CropService extends ChangeNotifier {
   CropService._();
   static final instance = CropService._();
+  static const _prefKey = 'selected_crop_id';
 
   final _db = Supabase.instance.client;
 
@@ -40,15 +43,17 @@ class CropService extends ChangeNotifier {
       final rows = await _db
           .from('crops')
           .select()
-          .eq('owner_uid', uid)
           .eq('status', 'active')
-          .order('created_at');
+          .order('created_at', ascending: true);
       crops = (rows as List)
           .map((r) => Crop.fromMap(Map<String, dynamic>.from(r)))
           .toList();
+
+      final prefs = await SharedPreferences.getInstance();
+      final wantedId = selected?.id ?? prefs.getString(_prefKey);
       selected = crops.isEmpty
           ? null
-          : crops.firstWhere((c) => c.id == selected?.id,
+          : crops.firstWhere((c) => c.id == wantedId,
               orElse: () => crops.first);
     } catch (e) {
       debugPrint('CropService.load error: $e');
@@ -61,11 +66,12 @@ class CropService extends ChangeNotifier {
 
   void select(Crop c) {
     selected = c;
+    SharedPreferences.getInstance()
+        .then((p) => p.setString(_prefKey, c.id))
+        .catchError((_) => false);
     notifyListeners();
   }
 
-  /// Call on logout / account deletion so the next user never sees the
-  /// previous user's crop (this is a singleton and outlives the session).
   void clear() {
     crops = [];
     selected = null;

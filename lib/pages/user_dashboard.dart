@@ -4,19 +4,20 @@ import 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
-
-// Re-exported so any file that imported AppBottomNav from here keeps working.
-export 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
 import 'package:flutter_application_harbest_1/pages/user_account.dart';
 import 'package:flutter_application_harbest_1/analytics/ai_analytics.dart';
 import 'package:flutter_application_harbest_1/plant_profile/profile.dart';
 import 'package:flutter_application_harbest_1/Insights/insights_recommendation.dart';
 import 'package:flutter_application_harbest_1/notification/alerts.dart';
+import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
+import 'package:flutter_application_harbest_1/services/supabase_claim.dart';
+import 'package:flutter_application_harbest_1/pages/claim_device.dart';
+import 'package:flutter_application_harbest_1/pages/add_crop.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
-import 'package:flutter_application_harbest_1/services/crop_services.dart';
 
 import 'dart:async';
 
@@ -47,7 +48,10 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   void initState() {
     super.initState();
-    CropService.instance.load();
+    () async {
+      await ensureSupabaseClaim();
+      await CropService.instance.load();
+    }();
   }
 
   // No longer const — DashboardScreen now needs a callback.
@@ -132,20 +136,20 @@ const List<SensorDef> kSensors = [
     label: 'Temp',
     unit: '°C',
     icon: AppIcons.temperature,
-    min: 10,
-    max: 24,
+    min: 15,
+    max: 25,
     tolerance: 14,
-    optimalText: '10°C – 24°C',
+    optimalText: '15°C – 25°C',
   ),
   SensorDef(
     key: 'humidity',
     label: 'Humidity',
     unit: '%',
     icon: AppIcons.humidity,
-    min: 40,
-    max: 70,
+    min: 60,
+    max: 80,
     tolerance: 25,
-    optimalText: '40% – 70%',
+    optimalText: '60% – 80%',
     decimals: 0,
   ),
   // NOAA NWS heat index chart: "Caution" band begins at 27°C.
@@ -162,13 +166,13 @@ const List<SensorDef> kSensors = [
   SensorDef(
     key: 'EC',
     label: 'EC',
-    unit: '',
+    unit: ' mS/cm',
     icon: AppIcons.conductivity,
-    min: 1000,
-    max: 2500,
-    tolerance: 1000,
-    optimalText: '1000 – 2500 μS/cm',
-    decimals: 0,
+    min: 1.2,
+    max: 2.4,
+    tolerance: 1.0,
+    optimalText: '1.2 – 2.4 mS/cm',
+    decimals: 2,
   ),
   // UW–Madison Extension garden soil-test ideal ranges (N, P, K).
   SensorDef(
@@ -176,33 +180,43 @@ const List<SensorDef> kSensors = [
     label: 'Nitrogen',
     unit: '',
     icon: AppIcons.nitrogen,
-    min: 5.8,
-    max: 11.6,
-    tolerance: 6.0,
-    optimalText: '5.8 – 11.6 ppm',
+    min: 30,
+    max: 3000,
+    tolerance: 30,
+    optimalText: '30+ mg/kg',
+    decimals: 0,
   ),
   SensorDef(
     key: 'phosphorus',
     label: 'Phosphorus',
     unit: '',
     icon: AppIcons.phosphorus,
-    min: 16,
-    max: 21,
-    tolerance: 10,
-    optimalText: '16 – 21 ppm',
+    min: 20,
+    max: 3000,
+    tolerance: 20,
+    optimalText: '20+ mg/kg',
+    decimals: 0,
   ),
   SensorDef(
     key: 'potassium',
     label: 'Potassium',
     unit: '',
     icon: AppIcons.potassium,
-    min: 161,
-    max: 201,
-    tolerance: 80,
-    optimalText: '161 – 201 ppm',
+    min: 20,
+    max: 3000,
+    tolerance: 20,
+    optimalText: '20+ mg/kg',
     decimals: 0,
   ),
 ];
+
+/// The Pi stores EC in µS/cm; the app shows it in mS/cm.
+Map<String, dynamic> normalizeReading(Map<String, dynamic> row) {
+  final ec = row['EC'];
+  final v = ec is num ? ec.toDouble() : double.tryParse('$ec');
+  if (v == null) return row;
+  return {...row, 'EC': v / 1000};
+}
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback? onNavigateToProfile;
@@ -219,6 +233,30 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   final String _uid = FirebaseAuth.instance.currentUser!.uid;
   final _supabase = Supabase.instance.client;
+
+  Future<void> _startSetup() async {
+    String? pending;
+    try {
+      final rows = await _supabase.from('devices').select('device_id');
+      final used = CropService.instance.crops.map((c) => c.deviceId).toSet();
+      for (final r in rows as List) {
+        final id = r['device_id'] as String;
+        if (!used.contains(id)) {
+          pending = id;
+          break;
+        }
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => pending == null
+            ? const ClaimDevicePage()
+            : AddCropPage(deviceId: pending),
+      ),
+    );
+  }
 
   Map<String, dynamic> _sensorData = {};
   // Oldest → newest. Feeds the mini charts in the Sensor Overview cards.
@@ -285,6 +323,64 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  void _openCropSwitcher() {
+    final svc = CropService.instance;
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.dialog),
+        ),
+      ),
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+                child: Text('Switch crop', style: AppText.cardTitle),
+              ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final c in svc.crops)
+                      ListTile(
+                        leading: const Icon(
+                          AppIcons.plant,
+                          color: AppColors.green,
+                        ),
+                        title: Text(c.name, style: AppText.body),
+                        subtitle: Text(
+                          '${c.deviceId} · '
+                          '${c.ownerUid == myUid ? 'Yours' : 'Monitoring'}',
+                          style: AppText.caption.copyWith(fontSize: 12),
+                        ),
+                        trailing: svc.selected?.id == c.id
+                            ? const Icon(AppIcons.check, color: AppColors.green)
+                            : null,
+                        onTap: () {
+                          svc.select(c);
+                          Navigator.pop(ctx);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -310,7 +406,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (!mounted || deviceId != _deviceId) return; // crop switched meanwhile
 
       final rows = List<Map<String, dynamic>>.from(
-        (response as List).map((e) => Map<String, dynamic>.from(e)),
+        (response as List).map(
+          (e) => normalizeReading(Map<String, dynamic>.from(e)),
+        ),
       );
 
       if (rows.isEmpty) {
@@ -351,7 +449,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
           callback: (payload) {
             if (!mounted) return;
-            final row = Map<String, dynamic>.from(payload.newRecord);
+            final row = normalizeReading(
+              Map<String, dynamic>.from(payload.newRecord),
+            );
             setState(() {
               _sensorData = row;
               _history = [..._history, row];
@@ -575,15 +675,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     },
     {
       'key': 'temperature',
-      'min': 10.0,
-      'max': 24.0,
+      'min': 15.0,
+      'max': 25.0,
       'tolerance': 14.0,
       'weight': 0.15,
     },
     {
       'key': 'humidity',
-      'min': 40.0,
-      'max': 70.0,
+      'min': 60.0,
+      'max': 80.0,
       'tolerance': 25.0,
       'weight': 0.10,
     },
@@ -601,9 +701,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   // than scored individually — the three are averaged together first,
   // so no single nutrient dominates the composite score.
   static const List<Map<String, dynamic>> _npkScoreConfig = [
-    {'key': 'nitrogen', 'min': 5.8, 'max': 11.6, 'tolerance': 6.0},
-    {'key': 'phosphorus', 'min': 16.0, 'max': 21.0, 'tolerance': 10.0},
-    {'key': 'potassium', 'min': 161.0, 'max': 201.0, 'tolerance': 80.0},
+    {'key': 'nitrogen', 'min': 30.0, 'max': 3000.0, 'tolerance': 30.0},
+    {'key': 'phosphorus', 'min': 20.0, 'max': 3000.0, 'tolerance': 20.0},
+    {'key': 'potassium', 'min': 20.0, 'max': 3000.0, 'tolerance': 20.0},
   ];
   static const double _npkWeight = 0.20;
 
@@ -856,42 +956,50 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ── SENSOR OVERVIEW GRID (mini charts + range status bars) ──
   Widget _buildSensorGrid() {
     if (CropService.instance.loaded && CropService.instance.selected == null) {
-  return const SizedBox(
-    height: 200,
-    child: Center(
-      child: Text(
-        'No crop is linked to your account yet.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: Colors.grey, fontSize: 16),
-      ),
-    ),
-  );
-}
-
-    if (_error != null) {
       return SizedBox(
+        height: 240,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(AppIcons.plant, size: 52, color: Colors.grey),
+                const SizedBox(height: 10),
+                const Text(
+                  'Add your device to start monitoring your crop.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey, fontSize: 16),
+                ),
+                const SizedBox(height: 16),
+                AppButton(label: 'Add your device', onPressed: _startSetup),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_error != null &&
+        _sensorData.isEmpty &&
+        _error!.startsWith('No sensor data')) {
+      return const SizedBox(
         height: 200,
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(AppIcons.offline, size: 52, color: Colors.grey),
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey, fontSize: 16),
-              ),
-              const SizedBox(height: 20),
-              AppButton(
-                label: 'Retry',
-                icon: AppIcons.refresh,
-                onPressed: () {
-                  setState(() => _isLoading = true);
-                  _fetchSensorData();
-                },
-              ),
-            ],
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(AppIcons.plant, size: 52, color: Colors.grey),
+                SizedBox(height: 10),
+                Text(
+                  'Waiting for the first reading.\nMake sure your device is switched on and connected.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey, fontSize: 16),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -1022,6 +1130,57 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ],
               ),
             ),
+
+            if (CropService.instance.crops.length > 1 ||
+                CropService.instance.crops.any(
+                  (c) => c.ownerUid != FirebaseAuth.instance.currentUser?.uid,
+                ))
+              Container(
+                width: double.infinity,
+                color: AppColors.green,
+                padding: const EdgeInsets.only(top: 4, bottom: 14),
+                child: Center(
+                  child: GestureDetector(
+                    onTap: _openCropSwitcher,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 200),
+                            child: Text(
+                              CropService.instance.selected?.name ??
+                                  'Choose crop',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(
+                            AppIcons.expand,
+                            size: 16,
+                            color: AppColors.textPrimary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
             // GREEN HEADER, lower part: the green band ends at the vertical
             // middle of the plant picture. Measured from the card's top:

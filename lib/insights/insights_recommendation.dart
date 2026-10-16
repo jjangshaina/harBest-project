@@ -11,6 +11,9 @@ import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
+import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
+    show normalizeReading;
 
 // A recommendation the user marked done / dismissed. It stays hidden until
 // [until] passes, the sensor returns to range, or it gets worse.
@@ -47,7 +50,11 @@ class _InsightsRecommendationState extends State<InsightsRecommendation> {
   @override
   void initState() {
     super.initState();
+
+    CropService.instance.addListener(_onCropChanged);
     _init();
+    
+
     // Re-reads the sensors every 30s; this also keeps "Updated x mins ago"
     // counting up. (This page stays alive inside the bottom-nav IndexedStack.)
     _timer = Timer.periodic(
@@ -59,8 +66,15 @@ class _InsightsRecommendationState extends State<InsightsRecommendation> {
   @override
   void dispose() {
     _timer?.cancel();
+    CropService.instance.removeListener(_onCropChanged);
     super.dispose();
   }
+
+  void _onCropChanged() {
+  if (!mounted || !CropService.instance.loaded) return;
+  setState(() => _isLoading = true);
+  _fetch(silent: true);
+}
 
   Future<void> _init() async {
     await _loadHidden();
@@ -70,21 +84,38 @@ class _InsightsRecommendationState extends State<InsightsRecommendation> {
   // ── DATA ──────────────────────────────────────────────────────────────
 
   Future<void> _fetch({bool silent = false}) async {
-    try {
-      final response = await _supabase
-          .from('sensor_readings')
-          .select()
-          .order('id', ascending: false)
-          .limit(_historyLength);
-      if (!mounted) return;
+  final svc = CropService.instance;
+  if (!svc.loaded) return; // crops still loading; the listener will call us
 
-      final rows = List<Map<String, dynamic>>.from(
-        (response as List).map((e) => Map<String, dynamic>.from(e)),
-      );
+  final deviceId = svc.selected?.deviceId;
+  if (deviceId == null) {
+    if (!mounted) return;
+    setState(() {
+      _reading = {};
+      _history = [];
+      _recs = [];
+      _error = 'No crop is linked to your account yet.';
+      _isLoading = false;
+    });
+    return;
+  }
+
+  try {
+    final response = await _supabase
+        .from('sensor_readings')
+        .select()
+        .eq('device_id', deviceId)
+        .order('timestamp', ascending: false)
+        .limit(_historyLength);
+    if (!mounted) return;
+
+    final rows = List<Map<String, dynamic>>.from(
+      (response as List).map((e) => normalizeReading(Map<String, dynamic>.from(e))),
+    );
 
       if (rows.isEmpty) {
         setState(() {
-          _error = 'No sensor data found. Start your Raspberry Pi!';
+          _error = 'No sensor data found for this crop yet.';
           _isLoading = false;
         });
         return;

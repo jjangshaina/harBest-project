@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
@@ -17,54 +18,88 @@ class _AlertsPageState extends State<AlertsPage> {
 
   List<Map<String, dynamic>> _alerts = [];
   bool _isLoading = true;
-
-  late final RealtimeChannel _alertsChannel;
+  RealtimeChannel? _alertsChannel;
+  String? _deviceId;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchAlerts();
-    _subscribeToAlerts();
+    CropService.instance.addListener(_onCropChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
   }
 
   @override
   void dispose() {
-    _supabase.removeChannel(_alertsChannel);
+    CropService.instance.removeListener(_onCropChanged);
+    if (_alertsChannel != null) _supabase.removeChannel(_alertsChannel!);
     super.dispose();
   }
 
-  Future<void> _fetchAlerts() async {
+  // Runs when the crops finish loading or the user switches crop.
+  void _onCropChanged() {
+    if (!mounted) return;
+    final svc = CropService.instance;
+    if (!svc.loaded) return;
+    final id = svc.selected?.deviceId;
+    if (_initialized && id == _deviceId) return;
+    _initialized = true;
+    _deviceId = id;
+    if (_alertsChannel != null) {
+      _supabase.removeChannel(_alertsChannel!);
+      _alertsChannel = null;
+    }
+    setState(() {
+      _alerts = [];
+      _isLoading = id != null;
+    });
+    if (id != null) {
+      _fetchAlerts(id);
+      _subscribeToAlerts(id);
+    }
+  }
+
+  Future<void> _fetchAlerts(String deviceId) async {
     try {
       final response = await _supabase
           .from('alerts')
           .select()
-          .order('created_at', ascending: false);
+          .eq('device_id', deviceId)
+          .order('created_at', ascending: false)
+          .limit(100);
 
-      if (!mounted) return;
+      if (!mounted || deviceId != _deviceId) return;
 
       setState(() {
-        _alerts = List<Map<String, dynamic>>.from(response);
+        _alerts = List<Map<String, dynamic>>.from(response)
+            .where((a) => a['device_id'] == deviceId)
+            .toList();
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      debugPrint("Alerts fetch error: $e");
+      debugPrint('Alerts fetch error: $e');
     }
   }
 
-  void _subscribeToAlerts() {
+  void _subscribeToAlerts(String deviceId) {
     _alertsChannel = _supabase
-        .channel('alerts_channel')
+        .channel('alerts_$deviceId')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
-          table: '',
+          table: 'alerts',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'device_id',
+            value: deviceId,
+          ),
           callback: (payload) {
-            if (!mounted) return;
-            setState(() {
-              _alerts.insert(0, Map<String, dynamic>.from(payload.newRecord));
-            });
+            if (!mounted || deviceId != _deviceId) return;
+            final row = Map<String, dynamic>.from(payload.newRecord);
+            if (row['device_id'] != deviceId) return;
+            setState(() => _alerts.insert(0, row));
           },
         )
         .subscribe();
@@ -142,24 +177,22 @@ class _AlertsPageState extends State<AlertsPage> {
     return Column(
       children: [
         const AppHeader(title: 'Recent Alerts'),
-
-        // Body
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _alerts.isEmpty
-              ? const AppEmptyState(
-                  icon: AppIcons.alertsOff,
-                  title: 'No recent alerts',
-                  message:
-                      'Alerts will appear here once your sensors detected a problem.',
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(AppSpace.page),
-                  itemCount: _alerts.length,
-                  itemBuilder: (context, index) =>
-                      _buildAlertCard(_alerts[index]),
-                ),
+                  ? const AppEmptyState(
+                      icon: AppIcons.alertsOff,
+                      title: 'No recent alerts',
+                      message:
+                          'Alerts will appear here once your sensors detected a problem.',
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(AppSpace.page),
+                      itemCount: _alerts.length,
+                      itemBuilder: (context, index) =>
+                          _buildAlertCard(_alerts[index]),
+                    ),
         ),
       ],
     );

@@ -23,7 +23,7 @@ class PlantImage extends StatelessWidget {
   }); 
 
   static const String fallbackUrl =
-      'https://urbangardeningmanila.wordpress.com/wp-content/uploads/2021/11/71bms5snrxl.jpg';
+      'https://ph-test-11.slatic.net/p/a0f49ec7874d8a5101708a29087e2881.jpg';
 
       String get _urlToShow =>
       (imageUrl != null && imageUrl!.isNotEmpty) ? imageUrl! : fallbackUrl;

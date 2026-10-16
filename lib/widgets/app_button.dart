@@ -234,3 +234,99 @@ class AppLandingButton extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// AUTH PAGES: green button + footer link
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Big green button. [active] only changes the look (green / grey); the
+/// button stays tappable unless [onPressed] is null.
+class AuthPrimaryButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final bool active;
+  final bool loading;
+
+  const AuthPrimaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.active = true,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = active ? AppColors.green : AppColors.disabledStart;
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
+        onPressed: loading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: bg,
+          disabledBackgroundColor: bg,
+          foregroundColor: Colors.white,
+          disabledForegroundColor: Colors.white,
+          elevation: 0,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        child: loading
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              )
+            : Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+/// "Already have an account? Sign in" style footer.
+class AuthFooterLink extends StatelessWidget {
+  final String prompt;
+  final String linkText;
+  final VoidCallback onTap;
+
+  const AuthFooterLink({
+    super.key,
+    required this.prompt,
+    required this.linkText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text('$prompt ', style: AppText.subtitle),
+        GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Text(
+            linkText,
+            style: const TextStyle(
+              color: AppColors.darkGreen,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              decoration: TextDecoration.underline,
+              decorationColor: AppColors.darkGreen,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

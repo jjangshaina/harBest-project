@@ -5,6 +5,8 @@ import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
+import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 
 /// Represents one stage in the plant's growth cycle.
 class GrowthStage {
@@ -334,57 +336,63 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   static const double _kValueColumnWidth = 62;
   static const double _kStatusPillWidth = 66;
 
-  @override
-  void initState() {
-    super.initState();
-    _fetchAll();
-  }
+ @override
+void initState() {
+  super.initState();
+  CropService.instance.addListener(_onCropChanged);
+  WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
+}
+
+@override
+void dispose() {
+  CropService.instance.removeListener(_onCropChanged);
+  super.dispose();
+}
+
+void _onCropChanged() {
+  if (!mounted || !CropService.instance.loaded) return;
+  setState(() => _isLoading = true);
+  _fetchAll();
+}
+
 
   Future<void> _fetchAll() async {
-    try {
-      // plant_info holds one row per plant: name, image, and planting date.
-      // There's a single shared device during development, so just grab
-      // the one row.
-      final plantInfoResponse = await _supabase
-          .from('plant_info')
-          .select()
-          .limit(1)
-          .maybeSingle();
+  final crop = CropService.instance.selected;
+  if (crop == null) {
+    if (!mounted) return;
+    setState(() {
+      _plantInfo = {};
+      _recentReadings = [];
+      _isLoading = false;
+    });
+    return;
+  }
+  try {
+    final readingsResponse = await _supabase
+        .from('sensor_readings')
+        .select()
+        .eq('device_id', crop.deviceId)
+        .order('timestamp', ascending: false)
+        .limit(_recentReadingsWindow);
 
-      final plantInfo = plantInfoResponse != null
-          ? Map<String, dynamic>.from(plantInfoResponse)
-          : <String, dynamic>{};
-
-      final deviceId = plantInfo['device_id'] as String?;
-
-      // sensor_readings is telemetry, not plant profile data — pull the
-      // recent window for this device, ordered by the real timestamp
-      // column (not id, which only reflects insert order).
-      var readingsQuery = _supabase.from('sensor_readings').select();
-      if (deviceId != null) {
-        readingsQuery = readingsQuery.eq('device_id', deviceId);
-      }
-      final readingsResponse = await readingsQuery
-          .order('timestamp', ascending: false)
-          .limit(_recentReadingsWindow);
-
-      if (!mounted) return;
-
-      final rows = (readingsResponse as List)
+    if (!mounted) return;
+    setState(() {
+      _plantInfo = {
+        'device_id': crop.deviceId,
+        'plant_name': crop.name,
+        'planting_date': crop.plantingDate?.toIso8601String(),
+      };
+      _recentReadings = (readingsResponse as List)
           .map((row) => Map<String, dynamic>.from(row as Map))
           .toList();
-
-      setState(() {
-        _plantInfo = plantInfo;
-        _recentReadings = rows;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      debugPrint("PlantProfilePage fetch error: $e");
-    }
+      _isLoading = false;
+    });
+  } catch (e) {
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    debugPrint("PlantProfilePage fetch error: $e");
   }
+}
 
   // --- Growth stage helpers -------------------------------------------------
 
@@ -550,7 +558,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   // --- UI ---------------------------------------------------------------
 
   Widget _buildCropImageCard() {
-    final imageUrl = _latestReading?['image_url'] as String?;
+    final imageUrl = CropService.instance.selected?.imageUrl ??
+    _latestReading?['image_url'] as String?;
 
     return Center(
       child: AppCard(
@@ -889,7 +898,13 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         // Body
         Expanded(
           child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
+    ? const Center(child: CircularProgressIndicator())
+    : (CropService.instance.loaded && CropService.instance.selected == null)
+        ? const AppEmptyState(
+            icon: AppIcons.plant,
+            title: 'No crop yet',
+            message: 'No crop is linked to your account yet.',
+          )
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(AppSpace.page),
                   child: Column(
