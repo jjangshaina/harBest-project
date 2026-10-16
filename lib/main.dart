@@ -18,9 +18,12 @@ void main() async {
 
   // Initializing Supabase for sensor data from Raspberry Pi
   await Supabase.initialize(
-    url: 'https://vdginsecbpsqdayqugtg.supabase.co',
-    anonKey: 'sb_publishable_SCZV5hZeFBgFChWKvkE1Ig_4_4P1kOH',
-  );
+    
+  url: 'https://vdginsecbpsqdayqugtg.supabase.co',
+  anonKey: 'sb_publishable_SCZV5hZeFBgFChWKvkE1Ig_4_4P1kOH',
+  accessToken: () async =>
+      await fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
+);
 
   runApp(const MyApp());
 }
