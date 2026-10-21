@@ -407,7 +407,7 @@ class _InsightsRecommendationState extends State<InsightsRecommendation> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: options.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           final option = options[i];
           final selected = option == _filter;
