@@ -4,9 +4,12 @@ import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
+import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
+    show normalizeReading;
 
 /// Represents one stage in the plant's growth cycle.
 class GrowthStage {
@@ -24,7 +27,12 @@ class GrowthStage {
 }
 
 const List<GrowthStage> kGrowthStages = [
-  GrowthStage(name: 'Germination', minDay: 0, maxDay: 7, icon: AppIcons.growthGermination),
+  GrowthStage(
+    name: 'Germination',
+    minDay: 0,
+    maxDay: 7,
+    icon: AppIcons.growthGermination,
+  ),
   GrowthStage(
     name: 'Seedling',
     minDay: 7,
@@ -112,18 +120,21 @@ class _ConditionFactor {
   });
 }
 
-/// The five sensor-backed ranges plus an NPK note, specific to one growth
+/// The six sensor-backed ranges plus an NPK note, specific to one growth
 /// stage. Needs differ across the growth cycle — e.g. germination wants
 /// consistently wet soil to trigger sprouting, while vegetative growth
 /// wants more moderate moisture and peak nitrogen. These are general
 /// horticultural targets for mustard greens; treat them as a reasonable
 /// starting point to refine against your own results over time.
+///
+/// [ec] is in mS/cm (the same unit the dashboard shows).
 class StageConditions {
   final _RangeSpec pH;
   final _RangeSpec soilMoisture;
   final _RangeSpec temperature;
   final _RangeSpec humidity;
   final _RangeSpec heatIndex;
+  final _RangeSpec ec;
   final String npkGuidance;
 
   const StageConditions({
@@ -132,6 +143,7 @@ class StageConditions {
     required this.temperature,
     required this.humidity,
     required this.heatIndex,
+    required this.ec,
     required this.npkGuidance,
   });
 }
@@ -168,6 +180,12 @@ final Map<String, StageConditions> kStageConditions = {
       acceptableMin: 15,
       acceptableMax: 27,
     ),
+    ec: _RangeSpec(
+      optimalMin: 0.8,
+      optimalMax: 1.5,
+      acceptableMin: 0.5,
+      acceptableMax: 2.0,
+    ),
     npkGuidance:
         'Minimal feeding needed — the seed itself supplies early nutrients.',
   ),
@@ -202,6 +220,12 @@ final Map<String, StageConditions> kStageConditions = {
       acceptableMin: 12,
       acceptableMax: 26,
     ),
+    ec: _RangeSpec(
+      optimalMin: 1.0,
+      optimalMax: 1.8,
+      acceptableMin: 0.7,
+      acceptableMax: 2.2,
+    ),
     npkGuidance: 'Begin light nitrogen feeding to support early leaf growth.',
   ),
   'Vegetative': const StageConditions(
@@ -234,6 +258,12 @@ final Map<String, StageConditions> kStageConditions = {
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 27,
+    ),
+    ec: _RangeSpec(
+      optimalMin: 1.2,
+      optimalMax: 2.4,
+      acceptableMin: 0.8,
+      acceptableMax: 3.0,
     ),
     npkGuidance:
         'Highest nitrogen demand of the whole cycle — this drives leaf growth.',
@@ -269,6 +299,12 @@ final Map<String, StageConditions> kStageConditions = {
       acceptableMin: 10,
       acceptableMax: 27,
     ),
+    ec: _RangeSpec(
+      optimalMin: 1.2,
+      optimalMax: 2.4,
+      acceptableMin: 0.8,
+      acceptableMax: 3.0,
+    ),
     npkGuidance:
         'Maintain balanced NPK; ease off heavy nitrogen as leaves mature.',
   ),
@@ -303,6 +339,12 @@ final Map<String, StageConditions> kStageConditions = {
       acceptableMin: 8,
       acceptableMax: 25,
     ),
+    ec: _RangeSpec(
+      optimalMin: 1.0,
+      optimalMax: 2.0,
+      acceptableMin: 0.7,
+      acceptableMax: 2.5,
+    ),
     npkGuidance:
         'Reduce fertilizing — the plant is shifting energy into flowering.',
   ),
@@ -321,11 +363,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   Map<String, dynamic> _plantInfo = {};
   List<Map<String, dynamic>> _recentReadings = [];
   bool _isLoading = true;
+  bool _isSavingDate = false;
 
   /// Which stage tile (if any) is expanded to show its optimal conditions.
   /// Accordion-style: tapping a different stage switches to it; tapping
-  /// the same one again collapses it. Every stage can be expanded, not
-  /// just the current one — each shows its own stage-specific targets.
+  /// the same one again collapses it.
   int? _expandedStageIndex;
 
   static const int _recentReadingsWindow = 5;
@@ -336,63 +378,116 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   static const double _kValueColumnWidth = 62;
   static const double _kStatusPillWidth = 66;
 
- @override
-void initState() {
-  super.initState();
-  CropService.instance.addListener(_onCropChanged);
-  WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
-}
+  @override
+  void initState() {
+    super.initState();
+    CropService.instance.addListener(_onCropChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
+  }
 
-@override
-void dispose() {
-  CropService.instance.removeListener(_onCropChanged);
-  super.dispose();
-}
+  @override
+  void dispose() {
+    CropService.instance.removeListener(_onCropChanged);
+    super.dispose();
+  }
 
-void _onCropChanged() {
-  if (!mounted || !CropService.instance.loaded) return;
-  setState(() => _isLoading = true);
-  _fetchAll();
-}
-
+  void _onCropChanged() {
+    if (!mounted || !CropService.instance.loaded) return;
+    setState(() => _isLoading = true);
+    _fetchAll();
+  }
 
   Future<void> _fetchAll() async {
-  final crop = CropService.instance.selected;
-  if (crop == null) {
-    if (!mounted) return;
-    setState(() {
-      _plantInfo = {};
-      _recentReadings = [];
-      _isLoading = false;
-    });
-    return;
-  }
-  try {
-    final readingsResponse = await _supabase
-        .from('sensor_readings')
-        .select()
-        .eq('device_id', crop.deviceId)
-        .order('timestamp', ascending: false)
-        .limit(_recentReadingsWindow);
+    final crop = CropService.instance.selected;
+    if (crop == null) {
+      if (!mounted) return;
+      setState(() {
+        _plantInfo = {};
+        _recentReadings = [];
+        _isLoading = false;
+      });
+      return;
+    }
+    try {
+      final readingsResponse = await _supabase
+          .from('sensor_readings')
+          .select()
+          .eq('device_id', crop.deviceId)
+          .order('timestamp', ascending: false)
+          .limit(_recentReadingsWindow);
 
-    if (!mounted) return;
-    setState(() {
-      _plantInfo = {
-        'device_id': crop.deviceId,
-        'plant_name': crop.name,
-        'planting_date': crop.plantingDate?.toIso8601String(),
-      };
-      _recentReadings = (readingsResponse as List)
-          .map((row) => Map<String, dynamic>.from(row as Map))
-          .toList();
-      _isLoading = false;
-    });
-  } catch (e) {
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-    debugPrint("PlantProfilePage fetch error: $e");
+      if (!mounted) return;
+      setState(() {
+        _plantInfo = {
+          'device_id': crop.deviceId,
+          'plant_name': crop.name,
+          'planting_date': crop.plantingDate?.toIso8601String(),
+        };
+        // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
+        _recentReadings = (readingsResponse as List)
+            .map((row) => normalizeReading(Map<String, dynamic>.from(row as Map)))
+            .toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      debugPrint("PlantProfilePage fetch error: $e");
+    }
   }
-}
+
+  // --- Planting date (add / edit) -------------------------------------------
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+  String _fmtDate(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
+
+  /// Opens the small pop-up, then saves whatever date the user confirmed.
+  Future<void> _openPlantingDateDialog() async {
+    if (_isSavingDate) return;
+    final crop = CropService.instance.selected;
+    if (crop == null) return;
+
+    final picked = await showDialog<DateTime>(
+      context: context,
+      builder: (_) => _PlantingDateDialog(current: crop.plantingDate),
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() => _isSavingDate = true);
+    try {
+      // .select() returns the updated rows, so an empty result means the
+      // database refused the change (e.g. not the owner of this crop).
+      final updated = await _supabase
+          .from('crops')
+          .update({'planting_date': _fmtDate(picked)})
+          .eq('crop_id', crop.id)
+          .select();
+      if ((updated as List).isEmpty) {
+        throw Exception('No rows updated');
+      }
+
+      // Reload crops; this notifies the listener above, which refreshes
+      // the day count, current stage and conditions panel.
+      await CropService.instance.load();
+
+      if (!mounted) return;
+      AppSnack.show(
+        context,
+        'Planting date updated.',
+        type: AppSnackType.success,
+      );
+    } catch (e) {
+      debugPrint('Update planting date error: $e');
+      if (!mounted) return;
+      AppSnack.show(
+        context,
+        'Could not update the planting date. Please try again.',
+        type: AppSnackType.error,
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingDate = false);
+    }
+  }
 
   // --- Growth stage helpers -------------------------------------------------
 
@@ -430,7 +525,7 @@ void _onCropChanged() {
     return kGrowthStages.length - 1;
   }
 
-  // --- Growth conditions (pH, moisture, temp, humidity, heat index, NPK) ---
+  // --- Growth conditions (pH, moisture, temp, humidity, heat index, EC, NPK) --
 
   Map<String, dynamic>? get _latestReading =>
       _recentReadings.isNotEmpty ? _recentReadings.first : null;
@@ -463,7 +558,7 @@ void _onCropChanged() {
     return _FactorStatus.unknown;
   }
 
-  /// Builds the six-factor breakdown for one specific stage, checked
+  /// Builds the seven-factor breakdown for one specific stage, checked
   /// against that stage's own ideal ranges (not a single global set) —
   /// germination and bolting want different soil moisture and temperature,
   /// for instance. Uses the latest reading for every instantaneous value.
@@ -478,6 +573,7 @@ void _onCropChanged() {
     final temperature = asDouble(latest?['temperature']);
     final humidity = asDouble(latest?['humidity']);
     final heatIndex = asDouble(latest?['heat_index']);
+    final ec = asDouble(latest?['EC']);
     final nutrientRec = latest?['nutrient_rec'] as String?;
 
     return [
@@ -526,6 +622,13 @@ void _onCropChanged() {
             : _FactorStatus.unknown,
       ),
       _ConditionFactor(
+        name: 'EC',
+        displayValue: ec != null ? ec.toStringAsFixed(2) : '—',
+        status: ec != null
+            ? _statusForValue(ranges.ec, ec)
+            : _FactorStatus.unknown,
+      ),
+      _ConditionFactor(
         name: 'N-P-K',
         displayValue: nutrientRec ?? 'No data',
         status: _statusFromNutrientRec(nutrientRec),
@@ -557,9 +660,12 @@ void _onCropChanged() {
 
   // --- UI ---------------------------------------------------------------
 
+  /// Plant photo card. The day-of-growth text sits right under the photo.
   Widget _buildCropImageCard() {
-    final imageUrl = CropService.instance.selected?.imageUrl ??
-    _latestReading?['image_url'] as String?;
+    final imageUrl =
+        CropService.instance.selected?.imageUrl ??
+        _latestReading?['image_url'] as String?;
+    final days = _getDaysSincePlanting();
 
     return Center(
       child: AppCard(
@@ -576,6 +682,23 @@ void _onCropChanged() {
               enableZoom: true,
             ),
             const SizedBox(height: 12),
+            if (days != null)
+              Text(
+                'Day $days of growth',
+                style: AppText.body.copyWith(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              )
+            else
+              Text(
+                'Planting date not set — tap + to add one.',
+                textAlign: TextAlign.center,
+                style: AppText.subtitle.copyWith(
+                  color: AppColors.textTertiary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
           ],
         ),
       ),
@@ -584,7 +707,7 @@ void _onCropChanged() {
 
   /// Growth Stage Timeline card: germination -> seedling -> vegetative
   /// -> harvest -> bolting, with the current stage highlighted based on
-  /// days elapsed since planting_date.
+  /// days elapsed since planting_date. Finished stages get a check mark.
   Widget _buildGrowthTimelineCard() {
     final daysSincePlanting = _getDaysSincePlanting();
     final hasPlantingDate = daysSincePlanting != null;
@@ -604,23 +727,15 @@ void _onCropChanged() {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(AppIcons.timeline, color: AppColors.green, size: 20),
+                  const Icon(
+                    AppIcons.timeline,
+                    color: AppColors.green,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Text('Growth Stage Timeline', style: AppText.cardTitle),
                 ],
               ),
-              const SizedBox(height: 6),
-              if (hasPlantingDate)
-                Text('Day $daysSincePlanting of growth', style: AppText.subtitle)
-              else
-                Text(
-                  'Planting date not set — add one to track progress.',
-                  style: AppText.subtitle.copyWith(
-                    color: AppColors.textTertiary,
-                    fontStyle: FontStyle.italic,
-                  
-                  ),
-                ),
               const SizedBox(height: 20),
               _buildGrowthTimeline(currentStageIndex, daysSincePlanting),
             ],
@@ -638,9 +753,9 @@ void _onCropChanged() {
         final isPast = index < currentStageIndex;
         final isLast = index == kGrowthStages.length - 1;
 
-        final Color circleColor = isCurrent
+        final Color circleColor = isCurrent || isPast
             ? AppColors.green
-            : (isPast ? AppColors.green.withOpacity(0.45) : AppColors.track);
+            : AppColors.track;
         final Color textColor = isCurrent
             ? AppColors.darkGreen
             : (isPast ? AppColors.textPrimary : AppColors.textTertiary);
@@ -684,9 +799,11 @@ void _onCropChanged() {
                           ? Border.all(color: AppColors.darkGreen, width: 2)
                           : null,
                     ),
+                    // Finished stages show a check mark instead of the
+                    // stage icon.
                     child: Icon(
-                      stage.icon,
-                      size: 18,
+                      isPast ? AppIcons.done : stage.icon,
+                      size: isPast ? 20 : 18,
                       color: isCurrent || isPast
                           ? AppColors.onGreen
                           : AppColors.textTertiary,
@@ -891,31 +1008,200 @@ void _onCropChanged() {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const AppHeader(title: 'Plant Profile'),
+    final hasCrop = CropService.instance.selected != null;
+    final showEmpty = CropService.instance.loaded && !hasCrop;
 
-        // Body
-        Expanded(
-          child: _isLoading
-    ? const Center(child: CircularProgressIndicator())
-    : (CropService.instance.loaded && CropService.instance.selected == null)
-        ? const AppEmptyState(
-            icon: AppIcons.plant,
-            title: 'No crop yet',
-            message: 'No crop is linked to your account yet.',
-          )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(AppSpace.page),
-                  child: Column(
-                    children: [
-                      _buildCropImageCard(),
-                      _buildGrowthTimelineCard(),
-                    ],
+    // Stack so the round "+" button can float over the bottom-right corner
+    // of the page, above the bottom navigation bar.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Column(
+          children: [
+            const AppHeader(title: 'Plant Profile'),
+
+            // Body
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : showEmpty
+                      ? const AppEmptyState(
+                          icon: AppIcons.plant,
+                          title: 'No crop yet',
+                          message: 'No crop is linked to your account yet.',
+                        )
+                      : SingleChildScrollView(
+                          // Extra bottom space so the floating button never
+                          // covers the last card.
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpace.page,
+                            AppSpace.page,
+                            AppSpace.page,
+                            96,
+                          ),
+                          child: Column(
+                            children: [
+                              _buildCropImageCard(),
+                              _buildGrowthTimelineCard(),
+                            ],
+                          ),
+                        ),
+            ),
+          ],
+        ),
+
+        if (hasCrop && !_isLoading)
+          Positioned(
+            right: AppSpace.page,
+            bottom: AppSpace.page,
+            child: FloatingActionButton(
+              heroTag: null,
+              tooltip: 'Add or edit planting date',
+              backgroundColor: AppColors.darkGreen,
+              foregroundColor: AppColors.onGreen,
+              elevation: 3,
+              shape: const CircleBorder(),
+              onPressed: _openPlantingDateDialog,
+              child: const Icon(AppIcons.add),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PLANTING DATE POP-UP
+// A small dialog (not a new page): a date field that opens the calendar,
+// plus Cancel / Save. Pops with the chosen DateTime on Save, null on Cancel.
+// ─────────────────────────────────────────────────────────────────────────
+class _PlantingDateDialog extends StatefulWidget {
+  /// The crop's current planting date, or null when none is set yet.
+  final DateTime? current;
+  const _PlantingDateDialog({this.current});
+
+  @override
+  State<_PlantingDateDialog> createState() => _PlantingDateDialogState();
+}
+
+class _PlantingDateDialogState extends State<_PlantingDateDialog> {
+  late final DateTime _today;
+  late DateTime _picked;
+
+  @override
+  void initState() {
+    super.initState();
+    final n = DateTime.now();
+    _today = DateTime(n.year, n.month, n.day);
+    final c = widget.current;
+    _picked = c == null ? _today : DateTime(c.year, c.month, c.day);
+    if (_picked.isAfter(_today)) _picked = _today;
+  }
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+  String _fmt(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
+
+  Future<void> _pickDate() async {
+    // Same window as the Add Crop page (up to 120 days back), but never
+    // later than the currently saved date so editing an older crop works.
+    final earliest = _today.subtract(const Duration(days: 120));
+    final first = _picked.isBefore(earliest) ? _picked : earliest;
+
+    final result = await showDatePicker(
+      context: context,
+      initialDate: _picked,
+      firstDate: first,
+      lastDate: _today,
+    );
+    if (result != null) setState(() => _picked = result);
+  }
+
+  Widget _button(String label, Color bg, Color fg, VoidCallback onTap) {
+    return ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: bg,
+        foregroundColor: fg,
+        elevation: 0,
+        minimumSize: const Size(0, 46),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.button),
+        ),
+        textStyle: AppText.button,
+      ),
+      child: Text(label),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.current == null
+                  ? 'Add new planting date'
+                  : 'Edit planting date',
+              style: AppText.body.copyWith(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 14),
+            GestureDetector(
+              onTap: _pickDate,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.fieldLight,
+                  borderRadius: BorderRadius.circular(AppRadius.field),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(_fmt(_picked), style: AppText.body)),
+                    const Icon(
+                      AppIcons.timeline,
+                      size: 20,
+                      color: AppColors.textSecondary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Row(
+              children: [
+                Expanded(
+                  child: _button(
+                    'Cancel',
+                    AppColors.authField,
+                    AppColors.textPrimary,
+                    () => Navigator.of(context).pop(),
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _button(
+                    'Save',
+                    AppColors.darkGreen,
+                    AppColors.onGreen,
+                    () => Navigator.of(context).pop(_picked),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
