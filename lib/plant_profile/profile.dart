@@ -1,9 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-import 'package:flutter_application_harbest_1/widgets/app_header.dart';
+import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/plant_profile/insight_rules.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
@@ -12,14 +16,18 @@ import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show normalizeReading;
 
 /// Represents one stage in the plant's growth cycle.
+/// [name] is the short label under each step; [title] is the descriptive
+/// heading shown in the press-and-hold card.
 class GrowthStage {
   final String name;
+  final String title;
   final int minDay;
   final int maxDay;
   final IconData icon;
 
   const GrowthStage({
     required this.name,
+    required this.title,
     required this.minDay,
     required this.maxDay,
     required this.icon,
@@ -29,33 +37,31 @@ class GrowthStage {
 const List<GrowthStage> kGrowthStages = [
   GrowthStage(
     name: 'Germination',
+    title: 'Seed Germination',
     minDay: 0,
     maxDay: 7,
     icon: AppIcons.growthGermination,
   ),
   GrowthStage(
     name: 'Seedling',
+    title: 'Seedling Development',
     minDay: 7,
     maxDay: 14,
     icon: AppIcons.growthSeedling,
   ),
   GrowthStage(
     name: 'Vegetative',
+    title: 'Rapid Leaf Growth',
     minDay: 14,
     maxDay: 30,
     icon: AppIcons.growthVegetative,
   ),
   GrowthStage(
-    name: 'Harvest',
+    name: 'Harvesting',
+    title: 'Mature Harvest',
     minDay: 30,
     maxDay: 50,
     icon: AppIcons.growthHarvest,
-  ),
-  GrowthStage(
-    name: 'Bolting',
-    minDay: 50,
-    maxDay: 75,
-    icon: AppIcons.growthBolting,
   ),
 ];
 
@@ -268,7 +274,7 @@ final Map<String, StageConditions> kStageConditions = {
     npkGuidance:
         'Highest nitrogen demand of the whole cycle — this drives leaf growth.',
   ),
-  'Harvest': const StageConditions(
+  'Harvesting': const StageConditions(
     pH: _RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
@@ -350,6 +356,14 @@ final Map<String, StageConditions> kStageConditions = {
   ),
 };
 
+// A recommendation the user marked done / dismissed. It stays hidden until
+// [until] passes, the sensor returns to range, or it gets worse.
+class _Hidden {
+  final DateTime until;
+  final int level; // HealthLevel.index when it was hidden
+  const _Hidden(this.until, this.level);
+}
+
 class PlantProfilePage extends StatefulWidget {
   const PlantProfilePage({super.key});
 
@@ -358,52 +372,75 @@ class PlantProfilePage extends StatefulWidget {
 }
 
 class _PlantProfilePageState extends State<PlantProfilePage> {
+  static const String _hiddenPrefsKey = 'insights_hidden_v1';
+  static const Duration _snoozeFor = Duration(hours: 6);
+
   final _supabase = Supabase.instance.client;
 
   Map<String, dynamic> _plantInfo = {};
-  List<Map<String, dynamic>> _recentReadings = [];
+  List<Map<String, dynamic>> _recentReadings = []; // newest → oldest
+  List<Recommendation> _recs = [];
+  final Map<String, _Hidden> _hidden = {};
+  InsightCategory? _filter; // null = All
+  String? _readingsError;
   bool _isLoading = true;
   bool _isSavingDate = false;
+  Timer? _timer;
 
-  /// Which stage tile (if any) is expanded to show its optimal conditions.
-  /// Accordion-style: tapping a different stage switches to it; tapping
-  /// the same one again collapses it.
-  int? _expandedStageIndex;
+  /// Stage whose optimal conditions are shown under the tracker while its
+  /// step is held down. [_peekVisible] turns off on release; the index is
+  /// kept so the section can collapse smoothly.
+  int? _peekIndex;
+  bool _peekVisible = false;
+  final LayerLink _timelineLink = LayerLink(); // anchors the stage card
+  Timer? _peekTimer;
+  Offset _peekDownPos = Offset.zero;
 
-  static const int _recentReadingsWindow = 5;
-
-  // Fixed widths for the conditions-panel table columns, so the value and
-  // status pill line up across rows regardless of how long each factor's
-  // name or label text happens to be.
-  static const double _kValueColumnWidth = 62;
-  static const double _kStatusPillWidth = 66;
+  // Newest readings kept. The latest one drives the conditions; the whole
+  // window feeds the trend notes in the recommendations.
+  static const int _recentReadingsWindow = 20;
 
   @override
   void initState() {
     super.initState();
     CropService.instance.addListener(_onCropChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadHidden();
+      _onCropChanged();
+    });
+    // Re-reads the sensors every 30s; this also keeps "Updated x mins ago"
+    // counting up.
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchAll());
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
+    _peekTimer?.cancel();
     CropService.instance.removeListener(_onCropChanged);
     super.dispose();
   }
 
   void _onCropChanged() {
     if (!mounted || !CropService.instance.loaded) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _recentReadings = [];
+      _recs = [];
+      _readingsError = null;
+    });
     _fetchAll();
   }
 
-  Future<void> _fetchAll() async {
+  Future<void> _fetchAll({bool silent = true}) async {
     final crop = CropService.instance.selected;
     if (crop == null) {
       if (!mounted) return;
       setState(() {
         _plantInfo = {};
         _recentReadings = [];
+        _recs = [];
+        _readingsError = null;
         _isLoading = false;
       });
       return;
@@ -416,24 +453,140 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           .order('timestamp', ascending: false)
           .limit(_recentReadingsWindow);
 
-      if (!mounted) return;
+      // Ignore the result if the user switched crop while this was loading.
+      if (!mounted || CropService.instance.selected?.deviceId != crop.deviceId) {
+        return;
+      }
+
+      // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
+      final rows = (readingsResponse as List)
+          .map((row) => normalizeReading(Map<String, dynamic>.from(row as Map)))
+          .toList();
+      final recs = rows.isEmpty
+          ? <Recommendation>[]
+          : buildRecommendations(rows.first, rows.reversed.toList());
+
+      // Forget hidden items whose sensor is back in range, so a new problem
+      // later is not silently hidden.
+      final before = _hidden.length;
+      _hidden.removeWhere((k, _) => !recs.any((r) => r.key == k));
+
       setState(() {
         _plantInfo = {
           'device_id': crop.deviceId,
           'plant_name': crop.name,
           'planting_date': crop.plantingDate?.toIso8601String(),
         };
-        // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
-        _recentReadings = (readingsResponse as List)
-            .map((row) => normalizeReading(Map<String, dynamic>.from(row as Map)))
-            .toList();
+        _recentReadings = rows;
+        _recs = recs;
+        _readingsError =
+            rows.isEmpty ? 'No sensor data found for this crop yet.' : null;
         _isLoading = false;
       });
+      if (_hidden.length != before) _saveHidden();
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
       debugPrint("PlantProfilePage fetch error: $e");
+      if (!mounted) return;
+      setState(() {
+        if (_recentReadings.isEmpty) {
+          _readingsError = 'Could not load sensor data. Check your connection.';
+        }
+        _isLoading = false;
+      });
+      if (!silent && _recentReadings.isNotEmpty) {
+        AppSnack.show(
+          context,
+          'Could not refresh. Showing the last data.',
+          type: AppSnackType.error,
+        );
+      }
     }
+  }
+
+  // --- Recommendations: hide / snooze ---------------------------------------
+
+  Future<void> _loadHidden() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_hiddenPrefsKey);
+      if (raw == null) return;
+      final now = DateTime.now();
+      (jsonDecode(raw) as Map<String, dynamic>).forEach((key, value) {
+        final m = value as Map<String, dynamic>;
+        final until = DateTime.fromMillisecondsSinceEpoch(m['until'] as int);
+        if (until.isAfter(now)) _hidden[key] = _Hidden(until, m['level'] as int);
+      });
+    } catch (_) {
+      // Unreadable saved state: start fresh.
+    }
+  }
+
+  Future<void> _saveHidden() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _hiddenPrefsKey,
+        jsonEncode({
+          for (final e in _hidden.entries)
+            e.key: {
+              'until': e.value.until.millisecondsSinceEpoch,
+              'level': e.value.level,
+            },
+        }),
+      );
+    } catch (_) {}
+  }
+
+  bool _isOpen(Recommendation r) {
+    final h = _hidden[r.key];
+    if (h == null || DateTime.now().isAfter(h.until)) return true;
+    return r.level.index > h.level; // got worse since it was hidden
+  }
+
+  Future<void> _hide(Recommendation r, {required bool done}) async {
+    setState(() {
+      _hidden[r.key] = _Hidden(DateTime.now().add(_snoozeFor), r.level.index);
+    });
+    await _saveHidden();
+    if (!mounted) return;
+    AppSnack.show(
+      context,
+      done
+          ? 'Marked as done. We will keep checking this sensor.'
+          : 'Dismissed. It will return if things get worse.',
+      type: done ? AppSnackType.success : AppSnackType.info,
+    );
+  }
+
+  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
+  // clock fields are already local time, so they are rebuilt as a local
+  // DateTime before comparing with now.
+  String _updatedText() {
+    final raw = _latestReading?['timestamp'];
+    if (raw == null) return '';
+    final utc = DateTime.tryParse(raw.toString())?.toUtc();
+    if (utc == null) return '';
+    final dt = DateTime(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
+    final diff = DateTime.now().difference(dt);
+
+    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'Updated $m min${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
+    }
+    final d = diff.inDays;
+    return 'Updated $d day${d == 1 ? '' : 's'} ago';
   }
 
   // --- Planting date (add / edit) -------------------------------------------
@@ -660,6 +813,29 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
   // --- UI ---------------------------------------------------------------
 
+  /// Plain title + "Updated ..." line at the top (no green header).
+  Widget _buildTitleBlock() {
+    final updated = _updatedText();
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        AppSpace.page,
+        MediaQuery.of(context).padding.top + 16,
+        AppSpace.page,
+        8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Plant Profile',
+            style: AppText.sectionTitle.copyWith(color: AppColors.darkGreen),
+          ),
+          if (updated.isNotEmpty) Text(updated, style: AppText.subtitle),
+        ],
+      ),
+    );
+  }
+
   /// Plant photo card. The day-of-growth text sits right under the photo.
   Widget _buildCropImageCard() {
     final imageUrl =
@@ -670,7 +846,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     return Center(
       child: AppCard(
         radius: 20,
-        outlineColor: AppColors.darkGreen,
         padding: const EdgeInsets.all(12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -705,22 +880,81 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  /// Growth Stage Timeline card: germination -> seedling -> vegetative
-  /// -> harvest -> bolting, with the current stage highlighted based on
-  /// days elapsed since planting_date. Finished stages get a check mark.
+  static const Duration _peekHoldDelay = Duration(milliseconds: 350);
+  static const double _peekMoveSlop = 12;
+
+  void _showPeek(int index) {
+    setState(() {
+      _peekIndex = index;
+      _peekVisible = true;
+    });
+  }
+
+  void _hidePeek() {
+    if (!_peekVisible) return;
+    setState(() => _peekVisible = false);
+  }
+
+  // The stage steps use raw pointer events instead of a long-press gesture,
+  // so the hold never takes over the touch: once the card is showing, the
+  // user can keep the finger down and still scroll the page to see all of it.
+  void _onStagePointerDown(int index, Offset position) {
+    _peekTimer?.cancel();
+    _peekDownPos = position;
+    _peekTimer = Timer(_peekHoldDelay, () {
+      _peekTimer = null;
+      if (mounted) _showPeek(index);
+    });
+  }
+
+  // Moving before the hold registers means the user is just scrolling.
+  void _onStagePointerMove(Offset position) {
+    final t = _peekTimer;
+    if (t != null && (position - _peekDownPos).distance > _peekMoveSlop) {
+      t.cancel();
+      _peekTimer = null;
+    }
+  }
+
+  void _onStagePointerEnd() {
+    _peekTimer?.cancel();
+    _peekTimer = null;
+    _hidePeek();
+  }
+
+  /// Card with the dark green outline AND the soft shadow used by the cards
+  /// on the other pages (AppCard gives one or the other, so the shadow sits
+  /// on a wrapper).
+  Widget _outlinedShadowCard({
+    required Widget child,
+    Color color = AppColors.darkGreen,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(14),
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        boxShadow: AppShadows.card,
+      ),
+      child: AppCard(outlineColor: color, padding: padding, child: child),
+    );
+  }
+
+  /// Growth Stage Timeline card: a horizontal progress tracker (germination
+  /// -> seedling -> vegetative -> harvesting). Finished stages show a check
+  /// mark. Press and hold any stage and a card with its optimal conditions
+  /// lays over the cards right below this one, pointing at that stage; let
+  /// go and it closes again.
   Widget _buildGrowthTimelineCard() {
-    final daysSincePlanting = _getDaysSincePlanting();
-    final hasPlantingDate = daysSincePlanting != null;
-    final currentStageIndex = hasPlantingDate
-        ? _getCurrentStageIndex(daysSincePlanting)
-        : -1;
+    final days = _getDaysSincePlanting();
+    final currentIndex = days != null ? _getCurrentStageIndex(days) : -1;
 
     return Padding(
       padding: const EdgeInsets.only(top: 14),
-      child: SizedBox(
+      child: CompositedTransformTarget(
+        link: _timelineLink,
+        child: SizedBox(
         width: double.infinity,
-        child: AppCard(
-          padding: const EdgeInsets.all(14),
+        child: _outlinedShadowCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -737,137 +971,231 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 ],
               ),
               const SizedBox(height: 20),
-              _buildGrowthTimeline(currentStageIndex, daysSincePlanting),
+              _buildGrowthStepper(currentIndex),
             ],
+          ),
+        ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGrowthStepper(int currentIndex) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(kGrowthStages.length, (i) {
+        final stage = kGrowthStages[i];
+        final isCurrent = i == currentIndex;
+        final isPast = i < currentIndex;
+        final isFirst = i == 0;
+        final isLast = i == kGrowthStages.length - 1;
+
+        final Color circleColor = isPast
+            ? AppColors.darkGreen
+            : (isCurrent ? AppColors.green : AppColors.track);
+        final Color textColor = isCurrent
+            ? AppColors.darkGreen
+            : (isPast ? AppColors.textPrimary : AppColors.textTertiary);
+
+        // Connector half-line on one side of the circle.
+        Widget line(bool visible, bool active) => Expanded(
+          child: Container(
+            height: 2,
+            color: !visible
+                ? Colors.transparent
+                : (active ? AppColors.darkGreen : AppColors.track),
+          ),
+        );
+
+        return Expanded(
+          child: Listener(
+            // Hold to view, release to close; scrolling still works.
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (e) => _onStagePointerDown(i, e.position),
+            onPointerMove: (e) => _onStagePointerMove(e.position),
+            onPointerUp: (_) => _onStagePointerEnd(),
+            onPointerCancel: (_) => _onStagePointerEnd(),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    line(!isFirst, i <= currentIndex),
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: circleColor,
+                        shape: BoxShape.circle,
+                        border: isCurrent
+                            ? Border.all(color: AppColors.darkGreen, width: 2)
+                            : null,
+                      ),
+                      // Finished stages show a check mark instead of the
+                      // stage icon.
+                      child: Icon(
+                        isPast ? AppIcons.done : stage.icon,
+                        size: isPast ? 20 : 18,
+                        color: isCurrent || isPast
+                            ? AppColors.onGreen
+                            : AppColors.textTertiary,
+                      ),
+                    ),
+                    line(!isLast, i < currentIndex),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    stage.name,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Day ${stage.minDay}–${stage.maxDay}',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: textColor.withOpacity(0.7),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  /// The held stage's card. It lays over the cards under the timeline card
+  /// (so nothing is pushed down or expanded) and scrolls together with the
+  /// page.
+  Widget _buildStageDetailsOverlay(int? daysSincePlanting) {
+    final index = _peekIndex;
+    if (index == null) return const SizedBox.shrink();
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      child: CompositedTransformFollower(
+        link: _timelineLink,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.bottomLeft,
+        followerAnchor: Alignment.topLeft,
+        child: IgnorePointer(
+          child: AnimatedOpacity(
+            opacity: _peekVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 150),
+            child: _buildStageDetails(index, daysSincePlanting),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildGrowthTimeline(int currentStageIndex, int? daysSincePlanting) {
-    return Column(
-      children: List.generate(kGrowthStages.length, (index) {
-        final stage = kGrowthStages[index];
-        final isCurrent = index == currentStageIndex;
-        final isPast = index < currentStageIndex;
-        final isLast = index == kGrowthStages.length - 1;
-
-        final Color circleColor = isCurrent || isPast
-            ? AppColors.green
-            : AppColors.track;
-        final Color textColor = isCurrent
-            ? AppColors.darkGreen
-            : (isPast ? AppColors.textPrimary : AppColors.textTertiary);
-
-        // A Stack (not IntrinsicHeight) so the connector line can stretch
-        // to the row's height without any intrinsic-size measuring.
-        return Stack(
+  /// Slim progress bar with a dark track, as in the design.
+  Widget _stageBar(double value) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        width: double.infinity,
+        height: 6,
+        child: Stack(
           children: [
-            if (!isLast)
-              Positioned(
-                left: 17,
-                top: 36,
-                bottom: 0,
-                width: 2,
-                child: ColoredBox(
-                  color: isPast
-                      ? AppColors.green.withOpacity(0.45)
-                      : AppColors.track,
-                ),
+            const Positioned.fill(
+              child: ColoredBox(color: AppColors.emphasisOutline),
+            ),
+            Positioned.fill(
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: value.clamp(0.0, 1.0),
+                child: const ColoredBox(color: AppColors.green),
               ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: isCurrent
-                      ? () {
-                          setState(() {
-                            _expandedStageIndex = _expandedStageIndex == index
-                                ? null
-                                : index;
-                          });
-                        }
-                      : null,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: circleColor,
-                      shape: BoxShape.circle,
-                      border: isCurrent
-                          ? Border.all(color: AppColors.darkGreen, width: 2)
-                          : null,
-                    ),
-                    // Finished stages show a check mark instead of the
-                    // stage icon.
-                    child: Icon(
-                      isPast ? AppIcons.done : stage.icon,
-                      size: isPast ? 20 : 18,
-                      color: isCurrent || isPast
-                          ? AppColors.onGreen
-                          : AppColors.textTertiary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          stage.name,
-                          style: AppText.body.copyWith(
-                            fontWeight: isCurrent
-                                ? FontWeight.bold
-                                : FontWeight.w600,
-                            color: textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Day ${stage.minDay}–${stage.maxDay}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: textColor.withOpacity(0.7),
-                          ),
-                        ),
-                        if (isCurrent) ...[
-                          const SizedBox(height: 8),
-                          AppProgressBar(
-                            value:
-                                ((daysSincePlanting! - stage.minDay) /
-                                        (stage.maxDay - stage.minDay))
-                                    .clamp(0.0, 1.0),
-                            color: AppColors.green,
-                            height: 6,
-                          ),
-                          if (_expandedStageIndex == index) ...[
-                            const SizedBox(height: 10),
-                            _buildStageConditionsPanel(stage.name),
-                          ],
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
             ),
           ],
-        );
-      }),
+        ),
+      ),
     );
   }
 
-  /// One factor's status tag, same look as every other status pill in the app.
-  Widget _statusPill(_FactorStatus status) => SizedBox(
-    width: _kStatusPillWidth,
-    child: Center(
-      child: AppStatusPill(text: status.label, color: status.color),
-    ),
-  );
+  /// The held stage's title, day range and optimal conditions, in a gray
+  /// bordered card with a small pointer aimed at that stage in the tracker.
+  Widget _buildStageDetails(int index, int? daysSincePlanting) {
+    final stage = kGrowthStages[index];
+    final isCurrent = daysSincePlanting != null &&
+        _getCurrentStageIndex(daysSincePlanting) == index;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The tracker splits the timeline card's inner width (14 padding +
+        // 1.5 border each side) into equal columns; aim at the held one.
+        const edge = 14 + 1.5;
+        final columnWidth =
+            (constraints.maxWidth - edge * 2) / kGrowthStages.length;
+        final pointerX = edge + columnWidth * (index + 0.5);
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: _outlinedShadowCard(
+                // Gray border (matches the design).
+                color: AppColors.disabledStart,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${stage.title} (${stage.name})',
+                      style: AppText.body.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Day ${stage.minDay}–${stage.maxDay}',
+                      style: AppText.caption.copyWith(fontSize: 12),
+                    ),
+                    if (isCurrent) ...[
+                      const SizedBox(height: 8),
+                      _stageBar(
+                        (daysSincePlanting - stage.minDay) /
+                            (stage.maxDay - stage.minDay),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    _buildStageConditionsPanel(stage.name),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: pointerX - 11,
+              top: 0,
+              child: CustomPaint(
+                size: const Size(22, 11.5),
+                painter: const _PointerPainter(
+                  fill: AppColors.card,
+                  border: AppColors.disabledStart,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   Widget _statusDot(_FactorStatus status) => Container(
     width: 8,
@@ -875,8 +1203,85 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     decoration: BoxDecoration(color: status.color, shape: BoxShape.circle),
   );
 
+  BoxDecoration get _chipDecoration => BoxDecoration(
+    color: AppColors.authField,
+    borderRadius: BorderRadius.circular(AppRadius.field),
+  );
+
+  /// One factor as a rounded tag: status dot and name on the left, value on
+  /// the right, so names and values line up down each column.
+  Widget _conditionChip(_ConditionFactor factor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: _chipDecoration,
+      child: Row(
+        children: [
+          _statusDot(factor.status),
+          const SizedBox(width: 6),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                factor.name,
+                maxLines: 1,
+                style: AppText.label.copyWith(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            factor.displayValue,
+            maxLines: 1,
+            style: AppText.label.copyWith(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// N-P-K gets a full-width tag: its value is a sentence from nutrient_rec.
+  Widget _npkChip(_ConditionFactor factor) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: _chipDecoration,
+      child: Row(
+        children: [
+          _statusDot(factor.status),
+          const SizedBox(width: 6),
+          Text(
+            factor.name,
+            style: AppText.label.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              factor.displayValue,
+              style: AppText.label.copyWith(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Optimal-conditions breakdown for one stage, checked against that
-  /// stage's own target ranges. Shown when its timeline row is tapped.
+  /// stage's own target ranges: a two-column grid of tags, then N-P-K.
   Widget _buildStageConditionsPanel(String stageName) {
     final factors = _buildConditionFactorsForStage(stageName);
     final score = _growthConditionsScore(factors);
@@ -887,12 +1292,15 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         .where((f) => f.status != _FactorStatus.unknown)
         .length;
 
+    final npk = factors.firstWhere((f) => f.name == 'N-P-K');
+    final grid = factors.where((f) => f.name != 'N-P-K').toList();
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.rowBackground,
-        borderRadius: BorderRadius.circular(AppRadius.button),
+        color: AppColors.track,
+        borderRadius: BorderRadius.circular(AppRadius.field),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -903,13 +1311,31 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 child: Text(
                   'OPTIMAL CONDITIONS',
                   style: AppText.label.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.darkGreen,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary,
                   ),
                 ),
               ),
               if (score != null)
-                AppStatusPill(text: '$score%', color: AppColors.optimal),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.green.withOpacity(0.35),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$score%',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.darkGreen,
+                    ),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 2),
@@ -919,72 +1345,24 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 : 'No sensor data available yet',
             style: AppText.caption.copyWith(fontSize: 11.5),
           ),
-          const SizedBox(height: 10),
-          ...factors.map((factor) {
-            final isLongValue = factor.name == 'N-P-K';
-            final nameStyle = AppText.label.copyWith(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            );
-            final valueStyle = AppText.caption.copyWith(
-              fontSize: 11.5,
-              color: AppColors.textSecondary,
-            );
-
-            if (isLongValue) {
-              // NPK's value is a full sentence from nutrient_rec (e.g.
-              // "Nitrogen low (0 mg/kg) - apply nitrogen fertilizer"), not
-              // a short number+unit like the other factors — give it its
-              // own line to wrap into instead of squeezing it into a row.
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        _statusDot(factor.status),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(factor.name, style: nameStyle)),
-                        const SizedBox(width: 8),
-                        _statusPill(factor.status),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 16),
-                      child: Text(factor.displayValue, style: valueStyle),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            return Padding(
+          const SizedBox(height: 12),
+          for (var i = 0; i < grid.length; i += 2)
+            Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 children: [
-                  _statusDot(factor.status),
+                  Expanded(child: _conditionChip(grid[i])),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(factor.name, style: nameStyle)),
-                  SizedBox(
-                    width: _kValueColumnWidth,
-                    child: Text(
-                      factor.displayValue,
-                      textAlign: TextAlign.right,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: valueStyle,
-                    ),
+                  Expanded(
+                    child: i + 1 < grid.length
+                        ? _conditionChip(grid[i + 1])
+                        : const SizedBox(),
                   ),
-                  const SizedBox(width: 8),
-                  _statusPill(factor.status),
                 ],
               ),
-            );
-          }),
-          const SizedBox(height: 2),
+            ),
+          _npkChip(npk),
+          const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1006,6 +1384,349 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
+  // ── Insights & Recommendations (moved here from the Insights page) ──
+
+  /// "Insights & Recommendation" card: title and the Actions / Priorities /
+  /// Critical counts. The recommendations themselves are separate cards below.
+  Widget _buildInsightsCard() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SizedBox(
+        width: double.infinity,
+        child: _outlinedShadowCard(
+          color: AppColors.disabledStart,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'INSIGHTS & RECOMMENDATION',
+                style: AppText.label.copyWith(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_recentReadings.isEmpty)
+                _buildNoReadings()
+              else
+                _buildSummaryStrip(_recs.where(_isOpen).toList()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoReadings() {
+    return Column(
+      children: [
+        Center(
+          child: Text(
+            _readingsError ?? 'No sensor data found for this crop yet.',
+            textAlign: TextAlign.center,
+            style: AppText.subtitle,
+          ),
+        ),
+        const SizedBox(height: 12),
+        AppButton(
+          label: 'Retry',
+          icon: AppIcons.refresh,
+          onPressed: () => _fetchAll(silent: false),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryStrip(List<Recommendation> open) {
+    final critical = open.where((r) => r.level == HealthLevel.critical).length;
+    final priorities = open.where((r) => r.score < kPriorityBelowScore).length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.track,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      child: Row(
+        children: [
+          _stat('Actions', '${open.length}'),
+          _stat('Priorities', '$priorities'),
+          _stat('Critical', '$critical'),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String label, String value) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value, style: AppText.cardTitle),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: AppText.body.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Filter chips and the recommendation cards. They sit on the page itself,
+  /// not inside the insights card. All priorities come first, the rest after.
+  Widget _buildRecommendations() {
+    if (_recentReadings.isEmpty) return const SizedBox.shrink();
+
+    final open = _recs.where(_isOpen).toList(); // most urgent first
+    if (open.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.only(top: AppSpace.cardGap),
+        child: SizedBox(
+          width: double.infinity,
+          height: 240,
+          child: AppEmptyState(
+            icon: AppIcons.success,
+            title: 'All clear',
+            message:
+                'All your sensors are in their optimal range. Nothing needs your attention right now.',
+          ),
+        ),
+      );
+    }
+
+    bool inFilter(Recommendation r) => _filter == null || r.category == _filter;
+    final priorities = open
+        .where((r) => r.score < kPriorityBelowScore && inFilter(r))
+        .toList();
+    final others = open
+        .where((r) => r.score >= kPriorityBelowScore && inFilter(r))
+        .toList();
+
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: AppSpace.cardGap),
+          _buildFilterChips(),
+          const SizedBox(height: AppSpace.cardGap),
+          if (priorities.isEmpty && others.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpace.section),
+              child: Center(
+                child: Text(
+                  'No ${_filter!.label.toLowerCase()} recommendations right now.',
+                  style: AppText.subtitle,
+                ),
+              ),
+            )
+          else ...[
+            for (final r in priorities) _buildRecCard(r, priority: true),
+            for (final r in others) _buildRecCard(r),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    const options = <InsightCategory?>[
+      null,
+      InsightCategory.water,
+      InsightCategory.nutrient,
+      InsightCategory.growth,
+    ];
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: options.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
+          final option = options[i];
+          final selected = option == _filter;
+          return ChoiceChip(
+            label: Text(
+              option?.label ?? 'All',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            selected: selected,
+            showCheckmark: false,
+            selectedColor: AppColors.green,
+            backgroundColor: AppColors.green.withOpacity(0.25),
+            side: BorderSide.none,
+            shape: const StadiumBorder(),
+            onSelected: (_) => setState(() => _filter = option),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _messageBox(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.green.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(AppRadius.button),
+      ),
+      child: Text(
+        message,
+        style: AppText.body.copyWith(fontSize: 14, height: 1.4),
+      ),
+    );
+  }
+
+  Widget _pillButton(
+    String label, {
+    required bool filled,
+    required VoidCallback onTap,
+  }) {
+    final color = filled ? AppColors.green : AppColors.destructive;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.button),
+    );
+    const size = Size(0, 38);
+    const padding = EdgeInsets.symmetric(horizontal: 22);
+    final text = AppText.button.copyWith(
+      fontSize: 14,
+      fontWeight: FontWeight.w700,
+    );
+    return filled
+        ? ElevatedButton(
+            onPressed: onTap,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: color,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              minimumSize: size,
+              padding: padding,
+              shape: shape,
+              textStyle: text,
+            ),
+            child: Text(label),
+          )
+        : OutlinedButton(
+            onPressed: onTap,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color, width: 1.5),
+              minimumSize: size,
+              padding: padding,
+              shape: shape,
+              textStyle: text,
+            ),
+            child: Text(label),
+          );
+  }
+
+  /// One recommendation, in its own card outlined in its status color.
+  /// Priority cards carry the "TOP PRIORITY" label. Every card keeps its
+  /// status tag, score bar and advice sentence.
+  Widget _buildRecCard(Recommendation r, {bool priority = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.cardGap),
+      child: SizedBox(
+        width: double.infinity,
+        child: _outlinedShadowCard(
+          color: r.level.color,
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (priority) ...[
+                Row(
+                  children: [
+                    Text(
+                      'TOP PRIORITY',
+                      style: AppText.label.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    AppStatusPill.level(r.level),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+              Row(
+                children: [
+                  Icon(r.def.icon, size: 22, color: r.level.color),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          r.title,
+                          style: AppText.body.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          r.subtitle,
+                          style: AppText.caption.copyWith(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Priority cards show the tag next to their label instead.
+                  if (!priority) ...[
+                    const SizedBox(width: 8),
+                    AppStatusPill.level(r.level),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 10),
+              AppProgressBar(
+                value: r.score / 100,
+                color: r.level.color,
+                height: 6,
+              ),
+              const SizedBox(height: 12),
+              _messageBox(r.message),
+              const SizedBox(height: 14),
+              // Buttons line up under the title text (icon 22 + gap 14).
+              Padding(
+                padding: const EdgeInsets.only(left: 36),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    _pillButton(
+                      'Mark as done',
+                      filled: true,
+                      onTap: () => _hide(r, done: true),
+                    ),
+                    _pillButton(
+                      'Dismiss',
+                      filled: false,
+                      onTap: () => _hide(r, done: false),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasCrop = CropService.instance.selected != null;
@@ -1018,7 +1739,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       children: [
         Column(
           children: [
-            const AppHeader(title: 'Plant Profile'),
+            _buildTitleBlock(),
 
             // Body
             Expanded(
@@ -1030,20 +1751,37 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                           title: 'No crop yet',
                           message: 'No crop is linked to your account yet.',
                         )
-                      : SingleChildScrollView(
-                          // Extra bottom space so the floating button never
-                          // covers the last card.
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpace.page,
-                            AppSpace.page,
-                            AppSpace.page,
-                            96,
-                          ),
-                          child: Column(
-                            children: [
-                              _buildCropImageCard(),
-                              _buildGrowthTimelineCard(),
-                            ],
+                      : RefreshIndicator(
+                          color: AppColors.green,
+                          onRefresh: () => _fetchAll(silent: false),
+                          child: SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            // Extra bottom space so the floating button never
+                            // covers the last card.
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpace.page,
+                              AppSpace.gap,
+                              AppSpace.page,
+                              96,
+                            ),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              fit: StackFit.passthrough,
+                              children: [
+                                Column(
+                                  children: [
+                                    _buildCropImageCard(),
+                                    _buildGrowthTimelineCard(),
+                                    _buildInsightsCard(),
+                                    _buildRecommendations(),
+                                  ],
+                                ),
+                                // Last child = drawn on top of the cards.
+                                _buildStageDetailsOverlay(
+                                  _getDaysSincePlanting(),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
             ),
@@ -1068,6 +1806,40 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       ],
     );
   }
+}
+
+// Small triangle on top of the stage details card, pointing up at the held
+// stage. Filled like the card, with the border drawn on its two slanted sides.
+class _PointerPainter extends CustomPainter {
+  final Color fill;
+  final Color border;
+  const _PointerPainter({required this.fill, required this.border});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final triangle = Path()
+      ..moveTo(0, size.height)
+      ..lineTo(size.width / 2, 0)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawPath(triangle, Paint()..color = fill);
+
+    final edges = Path()
+      ..moveTo(0, size.height)
+      ..lineTo(size.width / 2, 0)
+      ..lineTo(size.width, size.height);
+    canvas.drawPath(
+      edges,
+      Paint()
+        ..color = border
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _PointerPainter old) =>
+      old.fill != fill || old.border != border;
 }
 
 // ─────────────────────────────────────────────────────────────────────────

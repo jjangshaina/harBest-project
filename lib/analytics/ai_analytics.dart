@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
@@ -31,47 +32,29 @@ const Map<String, String> _shortNames = {
   'moisture': 'Moist',
 };
 
+const _axisStyle = TextStyle(fontSize: 10, color: AppColors.textSecondary);
+const _mutedStyle = TextStyle(color: AppColors.textTertiary, fontSize: 13);
+const _tooltipStyle = TextStyle(color: Colors.white, fontSize: 12);
+const _noTitles = AxisTitles(sideTitles: SideTitles(showTitles: false));
+const _months = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
+];
+
 String _short(String name) => _shortNames[name.toLowerCase()] ?? name;
 
-double? _toNum(dynamic v) {
-  if (v == null) return null;
-  if (v is num) return v.toDouble();
-  return double.tryParse(v.toString());
-}
+double? _toNum(dynamic v) => v is num ? v.toDouble() : double.tryParse('$v');
 
-const List<String> _months = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
+String _md(DateTime d, [bool year = false]) =>
+    '${_months[d.month - 1]} ${d.day}${year ? ', ${d.year}' : ''}';
 
 // "May 5 – 20, 2026", "May 5 – Jul 3, 2026" or "Dec 28, 2025 – Jan 3, 2026".
 String _fmtRange(DateTime? a, DateTime? b) {
   if (a == null && b == null) return 'no dates';
-  if (a == null || b == null) {
-    final d = (a ?? b)!;
-    return '${_months[d.month - 1]} ${d.day}, ${d.year}';
-  }
-  if (a.year != b.year) {
-    return '${_months[a.month - 1]} ${a.day}, ${a.year} – '
-        '${_months[b.month - 1]} ${b.day}, ${b.year}';
-  }
-  if (a.month == b.month) {
-    return a.day == b.day
-        ? '${_months[a.month - 1]} ${a.day}, ${a.year}'
-        : '${_months[a.month - 1]} ${a.day} – ${b.day}, ${a.year}';
-  }
-  return '${_months[a.month - 1]} ${a.day} – '
-      '${_months[b.month - 1]} ${b.day}, ${a.year}';
+  if (a == null || b == null) return _md((a ?? b)!, true);
+  if (a.year != b.year) return '${_md(a, true)} – ${_md(b, true)}';
+  if (a.month != b.month) return '${_md(a)} – ${_md(b, true)}';
+  return a.day == b.day ? _md(a, true) : '${_md(a)} – ${b.day}, ${a.year}';
 }
 
 // `crop_health` is TEXT, generated per-sensor. Scoring is pattern-based so
@@ -90,13 +73,119 @@ Color _colorForCropHealth(String label) {
   final s = _scoreForCropHealth(label);
   if (s == null) return AppColors.textTertiary;
   if (s >= 90) return AppColors.healthy;
-  if (s >= 50) return AppColors.caution;
-  return AppColors.critical;
+  return s >= 50 ? AppColors.caution : AppColors.critical;
 }
 
+String _axisFmt(double value, double range) =>
+    value.toStringAsFixed(range >= 20 ? 0 : (range >= 5 ? 1 : 2));
+
+String _dateLabel(DateTime? d, int index) =>
+    d == null ? '${index + 1}' : '${d.month}/${d.day}';
+
+// ── Shared chart pieces ──
+
+FlGridData _grid(double interval, {bool zeroLine = false}) => FlGridData(
+  show: true,
+  drawVerticalLine: false,
+  horizontalInterval: interval,
+  getDrawingHorizontalLine: (v) => FlLine(
+    color: zeroLine && v == 0 ? AppColors.textTertiary : AppColors.track,
+    strokeWidth: 1,
+  ),
+);
+
+Widget _tick(String text) => Text(
+  text,
+  textAlign: TextAlign.center,
+  style: const TextStyle(fontSize: 9, color: AppColors.textSecondary),
+);
+
+FlTitlesData _titles({
+  required double leftSize,
+  required double interval,
+  required String Function(double) leftLabel,
+  required double bottomSize,
+  required Widget? Function(int) bottom,
+  double? bottomInterval,
+}) => FlTitlesData(
+  topTitles: _noTitles,
+  rightTitles: _noTitles,
+  leftTitles: AxisTitles(
+    sideTitles: SideTitles(
+      showTitles: true,
+      reservedSize: leftSize,
+      interval: interval,
+      getTitlesWidget: (v, _) => Text(leftLabel(v), style: _axisStyle),
+    ),
+  ),
+  bottomTitles: AxisTitles(
+    sideTitles: SideTitles(
+      showTitles: true,
+      reservedSize: bottomSize,
+      interval: bottomInterval,
+      getTitlesWidget: (v, _) {
+        final w = v == v.roundToDouble() ? bottom(v.toInt()) : null;
+        return w == null
+            ? const SizedBox.shrink()
+            : Padding(padding: const EdgeInsets.only(top: 6), child: w);
+      },
+    ),
+  ),
+);
+
+Widget _barChart({
+  double minY = 0,
+  required double maxY,
+  required double interval,
+  required List<double> values,
+  required List<Color> colors,
+  required double barWidth,
+  required double leftSize,
+  required String Function(double) leftLabel,
+  required double bottomSize,
+  required Widget? Function(int) bottom,
+  required String Function(int) tip,
+  bool zeroLine = false,
+}) => BarChart(
+  BarChartData(
+    minY: minY,
+    maxY: maxY,
+    alignment: BarChartAlignment.spaceAround,
+    gridData: _grid(interval, zeroLine: zeroLine),
+    borderData: FlBorderData(show: false),
+    titlesData: _titles(
+      leftSize: leftSize,
+      interval: interval,
+      leftLabel: leftLabel,
+      bottomSize: bottomSize,
+      bottom: (i) => i < 0 || i >= values.length ? null : bottom(i),
+    ),
+    barTouchData: BarTouchData(
+      touchTooltipData: BarTouchTooltipData(
+        getTooltipColor: (_) => AppColors.textPrimary,
+        getTooltipItem: (g, gi, rod, ri) =>
+            BarTooltipItem(tip(gi), _tooltipStyle),
+      ),
+    ),
+    barGroups: [
+      for (int i = 0; i < values.length; i++)
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: values[i],
+              color: colors[i],
+              width: barWidth,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
+        ),
+    ],
+  ),
+);
+
 class _CorrPair {
-  final String a;
-  final String b;
+  final String a, b;
   final double value;
   const _CorrPair(this.a, this.b, this.value);
 }
@@ -117,6 +206,13 @@ class _WeeklyPt {
   const _WeeklyPt(this.weekEnd, this.mean, this.n);
 }
 
+/// Loading / error / data triple for one fetched series.
+class _Series<T> {
+  bool loading = true;
+  String? error;
+  List<T> data = [];
+}
+
 class AiAnalytics extends StatefulWidget {
   const AiAnalytics({super.key});
 
@@ -130,25 +226,21 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   // ── EDA cards state ──
   bool _edaLoading = true;
   String? _edaError;
-  List<_CorrPair> _topCorrelations = [];
-  // metric -> (crop_health -> avg_value)
-  Map<String, Map<String, double>> _breakdown = {};
-  String? _selectedMetric;
+  List<_CorrPair> _allCorrelations = []; // every unique pair, strongest first
+  Map<String, Map<String, double>> _breakdown = {}; // metric -> health -> avg
 
   // ── Daily rolling / weekly average state ──
-  bool _dailyLoading = true;
-  String? _dailyError;
-  List<_DailyPt> _daily = [];
+  final _daily = _Series<_DailyPt>();
+  final _weekly = _Series<_WeeklyPt>();
+  String _statKey = 'moisture'; // sensor driving every analytics card
 
-  bool _weeklyLoading = true;
-  String? _weeklyError;
-  List<_WeeklyPt> _weekly = [];
+  // Sensor chip row scrolling + minimap position (start, size as 0..1).
+  final _chipScroll = ScrollController();
+  final _chipKeys = List.generate(kSensors.length, (_) => GlobalKey());
+  final _mini = ValueNotifier<(double, double)>((0.0, 1.0));
 
-  String _statKey = 'moisture'; // sensor shown in the two new charts
-
-  // Overall period covered by the data (earliest / latest day).
-  DateTime? _covStart;
-  DateTime? _covEnd;
+  // Overall period covered by the data (earliest / latest reading).
+  DateTime? _covStart, _covEnd;
 
   @override
   void initState() {
@@ -160,6 +252,8 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   @override
   void dispose() {
     CropService.instance.removeListener(_onCropChanged);
+    _chipScroll.dispose();
+    _mini.dispose();
     super.dispose();
   }
 
@@ -172,8 +266,16 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     _fetchWeekly();
   }
 
+  Future<void> _refreshAll() => Future.wait([
+    _fetchEda(showSpinner: false),
+    _fetchCoverage(),
+    _fetchDaily(showSpinner: false),
+    _fetchWeekly(showSpinner: false),
+  ]);
+
   String? get _deviceId => CropService.instance.selected?.deviceId;
-  // ───────────────────────── DATA: EDA tables ─────────────────────────
+
+  // ───────────────────────── DATA ─────────────────────────
 
   Future<void> _fetchEda({bool showSpinner = true}) async {
     if (showSpinner) {
@@ -182,63 +284,43 @@ class _AiAnalyticsState extends State<AiAnalytics> {
         _edaError = null;
       });
     }
-
-    final deviceId = _deviceId;
-    if (deviceId == null) {
-      if (!mounted) return;
-      setState(() {
-        _topCorrelations = [];
-        _breakdown = {};
-        _selectedMetric = null;
-        _edaLoading = false;
-        _edaError = null;
-      });
-      return;
-    }
-
+    final id = _deviceId;
     try {
-      final corrRes = await _supabase.rpc(
-        'device_correlations',
-        params: {'p_device': deviceId},
-      );
-      final breakdownRes = await _supabase.rpc(
-        'device_target_breakdown',
-        params: {'p_device': deviceId},
-      );
-
-      // Correlations: drop self-pairs and mirrored duplicates, keep the 6
-      // strongest by absolute value.
-      final seen = <String>{};
       final pairs = <_CorrPair>[];
-      for (final row in List<Map<String, dynamic>>.from(corrRes as List)) {
-        final a = '${row['col_a']}';
-        final b = '${row['col_b']}';
-        final v = (row['correlation'] as num?)?.toDouble();
-        if (v == null || a == b) continue;
-        final key = ([a, b]..sort()).join('|');
-        if (!seen.add(key)) continue;
-        pairs.add(_CorrPair(a, b, v));
-      }
-      pairs.sort((x, y) => y.value.abs().compareTo(x.value.abs()));
-      final top = pairs.take(6).toList();
-
-      // Breakdown: group by metric.
       final grouped = <String, Map<String, double>>{};
-      for (final row in List<Map<String, dynamic>>.from(breakdownRes as List)) {
-        final metric = '${row['metric']}';
-        final health = '${row['crop_health']}';
-        final v = (row['avg_value'] as num?)?.toDouble();
-        if (v == null) continue;
-        grouped.putIfAbsent(metric, () => {})[health] = v;
-      }
+      if (id != null) {
+        final corr = await _supabase.rpc(
+          'device_correlations',
+          params: {'p_device': id},
+        );
+        final breakdown = await _supabase.rpc(
+          'device_target_breakdown',
+          params: {'p_device': id},
+        );
 
+        // Drop self-pairs and mirrored duplicates; the card filters by sensor.
+        final seen = <String>{};
+        for (final row in List<Map<String, dynamic>>.from(corr as List)) {
+          final a = '${row['col_a']}', b = '${row['col_b']}';
+          final v = _toNum(row['correlation']);
+          if (v == null || a == b || !seen.add(([a, b]..sort()).join('|'))) {
+            continue;
+          }
+          pairs.add(_CorrPair(a, b, v));
+        }
+        pairs.sort((x, y) => y.value.abs().compareTo(x.value.abs()));
+
+        for (final row in List<Map<String, dynamic>>.from(breakdown as List)) {
+          final v = _toNum(row['avg_value']);
+          if (v == null) continue;
+          final byHealth = grouped.putIfAbsent('${row['metric']}', () => {});
+          byHealth['${row['crop_health']}'] = v;
+        }
+      }
       if (!mounted) return;
       setState(() {
-        _topCorrelations = top;
+        _allCorrelations = pairs;
         _breakdown = grouped;
-        if (_selectedMetric == null || !grouped.containsKey(_selectedMetric)) {
-          _selectedMetric = grouped.isEmpty ? null : grouped.keys.first;
-        }
         _edaLoading = false;
         _edaError = null;
       });
@@ -252,165 +334,119 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     }
   }
 
-  // Earliest and latest day in sensor_daily_rolling (the overall coverage).
+  // Earliest and latest reading for this device (the overall coverage).
   Future<void> _fetchCoverage() async {
-    final deviceId = _deviceId;
-    if (deviceId == null) {
-      if (!mounted) return;
-      setState(() {
-        _covStart = null;
-        _covEnd = null;
-      });
-      return;
-    }
+    final id = _deviceId;
     try {
-      final first = await _supabase
-          .from('sensor_readings')
-          .select('timestamp')
-          .eq('device_id', deviceId)
-          .order('timestamp', ascending: true)
-          .limit(1);
-      final last = await _supabase
-          .from('sensor_readings')
-          .select('timestamp')
-          .eq('device_id', deviceId)
-          .order('timestamp', ascending: false)
-          .limit(1);
-
-      DateTime? parse(dynamic res) {
-        final list = res as List;
-        return list.isEmpty
+      Future<DateTime?> edge(bool asc) async {
+        final r = await _supabase
+            .from('sensor_readings')
+            .select('timestamp')
+            .eq('device_id', id!)
+            .order('timestamp', ascending: asc)
+            .limit(1);
+        return r.isEmpty
             ? null
-            : DateTime.tryParse('${list.first['timestamp']}')?.toUtc();
+            : DateTime.tryParse('${r.first['timestamp']}')?.toUtc();
       }
 
+      final start = id == null ? null : await edge(true);
+      final end = id == null ? null : await edge(false);
       if (!mounted) return;
       setState(() {
-        _covStart = parse(first);
-        _covEnd = parse(last);
+        _covStart = start;
+        _covEnd = end;
       });
     } catch (e) {
       debugPrint('Coverage fetch error: $e');
     }
   }
 
-  // ───────────────────── DATA: daily rolling / weekly avg ─────────────────────
-
-  Future<void> _fetchDaily({bool showSpinner = true}) async {
+  /// Fetches the newest [keep] rows of [rpc] for the selected sensor into [s]
+  /// (oldest → newest).
+  Future<void> _fetchSeries<T extends Object>(
+    _Series<T> s,
+    String rpc,
+    String orderCol,
+    int keep,
+    T? Function(Map<String, dynamic>) parse,
+    String errMsg,
+    bool showSpinner,
+  ) async {
     final key = _statKey;
     if (showSpinner) {
       setState(() {
-        _dailyLoading = true;
-        _dailyError = null;
+        s.loading = true;
+        s.error = null;
       });
     }
-
-    final deviceId = _deviceId;
-    if (deviceId == null) {
-      if (!mounted) return;
-      setState(() {
-        _daily = [];
-        _dailyLoading = false;
-        _dailyError = null;
-      });
-      return;
-    }
-
+    final id = _deviceId;
     try {
-      final res = await _supabase
-          .rpc('device_daily_rolling', params: {'p_device': deviceId})
-          .ilike('sensor', key)
-          .order('day', ascending: false)
-          .limit(_dailyKeep);
-
-      final pts = (res as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .map(
-            (r) => _DailyPt(
-              DateTime.tryParse('${r['day']}'),
-              _toNum(r['daily_mean']),
-              _toNum(r['rolling_7d_mean']),
-            ),
-          )
-          .toList()
-          .reversed
-          .toList(); // oldest → newest
-
+      var rows = <T>[];
+      if (id != null) {
+        final res = await _supabase
+            .rpc(rpc, params: {'p_device': id})
+            .ilike('sensor', key)
+            .order(orderCol, ascending: false)
+            .limit(keep);
+        rows = (res as List)
+            .map((e) => parse(Map<String, dynamic>.from(e as Map)))
+            .nonNulls
+            .toList()
+            .reversed
+            .toList();
+      }
       if (!mounted || key != _statKey) return; // sensor changed meanwhile
       setState(() {
-        _daily = pts;
-        _dailyLoading = false;
-        _dailyError = null;
+        s.data = rows;
+        s.loading = false;
+        s.error = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _dailyError = 'Could not load daily rolling data.';
-        _dailyLoading = false;
+        s.error = errMsg;
+        s.loading = false;
       });
-      debugPrint('Daily rolling fetch error: $e');
+      debugPrint('$rpc fetch error: $e');
     }
   }
 
-  Future<void> _fetchWeekly({bool showSpinner = true}) async {
-    final key = _statKey;
-    if (showSpinner) {
-      setState(() {
-        _weeklyLoading = true;
-        _weeklyError = null;
-      });
-    }
+  Future<void> _fetchDaily({bool showSpinner = true}) => _fetchSeries(
+    _daily,
+    'device_daily_rolling',
+    'day',
+    _dailyKeep,
+    (r) => _DailyPt(
+      DateTime.tryParse('${r['day']}'),
+      _toNum(r['daily_mean']),
+      _toNum(r['rolling_7d_mean']),
+    ),
+    'Could not load daily rolling data.',
+    showSpinner,
+  );
 
-    final deviceId = _deviceId;
-    if (deviceId == null) {
-      if (!mounted) return;
-      setState(() {
-        _weekly = [];
-        _weeklyLoading = false;
-        _weeklyError = null;
-      });
-      return;
-    }
+  Future<void> _fetchWeekly({bool showSpinner = true}) => _fetchSeries(
+    _weekly,
+    'device_weekly_avg',
+    'week_end',
+    _weeklyKeep,
+    (r) {
+      final mean = _toNum(r['weekly_mean']);
+      return mean == null
+          ? null
+          : _WeeklyPt(
+              DateTime.tryParse('${r['week_end']}'),
+              mean,
+              _toNum(r['n_readings'])?.toInt(),
+            );
+    },
+    'Could not load weekly average data.',
+    showSpinner,
+  );
 
-    try {
-      final res = await _supabase
-          .rpc('device_weekly_avg', params: {'p_device': deviceId})
-          .ilike('sensor', key)
-          .order('week_end', ascending: false)
-          .limit(_weeklyKeep);
-
-
-      final pts = <_WeeklyPt>[];
-      for (final e in (res as List)) {
-        final r = Map<String, dynamic>.from(e as Map);
-        final mean = _toNum(r['weekly_mean']);
-        if (mean == null) continue;
-        pts.add(
-          _WeeklyPt(
-            DateTime.tryParse('${r['week_end']}'),
-            mean,
-            _toNum(r['n_readings'])?.toInt(),
-          ),
-        );
-      }
-      final ordered = pts.reversed.toList(); // oldest → newest
-
-      if (!mounted || key != _statKey) return;
-      setState(() {
-        _weekly = ordered;
-        _weeklyLoading = false;
-        _weeklyError = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _weeklyError = 'Could not load weekly average data.';
-        _weeklyLoading = false;
-      });
-      debugPrint('Weekly avg fetch error: $e');
-    }
-  }
-
+  // Changing the sensor re-drives every card: daily + weekly refetch, while
+  // correlations and the health breakdown are filtered from loaded data.
   void _selectSensor(String key) {
     if (key == _statKey) return;
     setState(() => _statKey = key);
@@ -418,27 +454,42 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     _fetchWeekly();
   }
 
+  bool _isSelected(String name) => name.toLowerCase() == _statKey.toLowerCase();
+
+  // All correlation pairs that involve the selected sensor, strongest first.
+  List<_CorrPair> get _sensorCorrelations => [
+    for (final p in _allCorrelations)
+      if (_isSelected(p.a) || _isSelected(p.b)) p,
+  ];
+
+  // Health-breakdown data for the selected sensor (case-insensitive match).
+  Map<String, double>? get _sensorBreakdown {
+    for (final e in _breakdown.entries) {
+      if (_isSelected(e.key)) return e.value;
+    }
+    return null;
+  }
+
   SensorDef get _selectedDef {
-  final d = kSensors.firstWhere(
-    (d) => d.key == _statKey,
-    orElse: () => kSensors.first,
-  );
-  if (d.key != 'EC') return d;
-  // The analytics functions return raw µS/cm, so show EC in µS/cm here.
-  final lo = d.min * 1000;
-  final hi = d.max * 1000;
-  return SensorDef(
-    key: d.key,
-    label: d.label,
-    unit: ' µS/cm',
-    icon: d.icon,
-    min: lo,
-    max: hi,
-    tolerance: d.tolerance * 1000,
-    optimalText: '${lo.toStringAsFixed(0)} – ${hi.toStringAsFixed(0)} µS/cm',
-    decimals: 0,
-  );
-}
+    final d = kSensors.firstWhere(
+      (d) => d.key == _statKey,
+      orElse: () => kSensors.first,
+    );
+    if (d.key != 'EC') return d;
+    // The analytics functions return raw µS/cm, so show EC in µS/cm here.
+    final lo = d.min * 1000, hi = d.max * 1000;
+    return SensorDef(
+      key: d.key,
+      label: d.label,
+      unit: ' µS/cm',
+      icon: d.icon,
+      min: lo,
+      max: hi,
+      tolerance: d.tolerance * 1000,
+      optimalText: '${lo.toStringAsFixed(0)} – ${hi.toStringAsFixed(0)} µS/cm',
+      decimals: 0,
+    );
+  }
 
   // ───────────────────────── SHARED UI ─────────────────────────
 
@@ -446,8 +497,9 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     required String title,
     required String subtitle,
     required Widget body,
-    double height = 180,
-    Widget? footer,
+    double height = 200,
+    List<Widget> footer = const [],
+    String? caption,
   }) {
     return SizedBox(
       width: double.infinity,
@@ -461,94 +513,51 @@ class _AiAnalyticsState extends State<AiAnalytics> {
             Text(subtitle, style: AppText.subtitle),
             const SizedBox(height: 12),
             SizedBox(height: height, child: body),
-            if (footer != null) ...[const SizedBox(height: 6), footer],
+            const SizedBox(height: 6),
+            ...footer,
+            if (caption != null) Text(caption, style: AppText.caption),
           ],
         ),
       ),
     );
   }
 
-  Widget _errorBody(String message, VoidCallback onRetry) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(AppIcons.offline, size: 36, color: AppColors.textTertiary),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.textTertiary, fontSize: 13),
-          ),
-          const SizedBox(height: 10),
-          AppButton(label: 'Retry', icon: AppIcons.refresh, onPressed: onRetry),
-        ],
-      ),
-    );
-  }
+  Widget _emptyBody(String message) => Center(
+    child: Text(message, textAlign: TextAlign.center, style: _mutedStyle),
+  );
 
-  Widget _emptyBody(String message) {
-    return Center(
-      child: Text(
-        message,
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: AppColors.textTertiary, fontSize: 13),
-      ),
-    );
-  }
-
-  Widget _legendDot(Color color, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+  Widget _errorBody(String message, VoidCallback onRetry) => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Container(width: 10, height: 3, color: color),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
-        ),
-        const SizedBox(width: 12),
+        const Icon(AppIcons.offline, size: 36, color: AppColors.textTertiary),
+        const SizedBox(height: 8),
+        Text(message, textAlign: TextAlign.center, style: _mutedStyle),
+        const SizedBox(height: 10),
+        AppButton(label: 'Retry', icon: AppIcons.refresh, onPressed: onRetry),
       ],
-    );
-  }
+    ),
+  );
 
-  // Sensor picker shared by the daily rolling and weekly average cards.
-  Widget _sensorChips() {
-    return SizedBox(
-      height: 34,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: kSensors.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final def = kSensors[i];
-          final selected = def.key == _statKey;
-          return ChoiceChip(
-            label: Text(
-              def.label,
-              style: TextStyle(
-                fontSize: 12,
-                color: selected ? Colors.white : AppColors.textPrimary,
-              ),
-            ),
-            selected: selected,
-            selectedColor: AppColors.green,
-            showCheckmark: false,
-            onSelected: (_) => _selectSensor(def.key),
-          );
-        },
+  // Spinner or error body while a chart isn't ready; null when it is.
+  Widget? _notReady(bool loading, String? error, VoidCallback retry) => loading
+      ? const Center(child: CircularProgressIndicator())
+      : error != null
+      ? _errorBody(error, retry)
+      : null;
+
+  Widget _legendDot(Color color, String label) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(width: 10, height: 3, color: color),
+      const SizedBox(width: 4),
+      Text(
+        label,
+        style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
       ),
-    );
-  }
-
-  String _axisFmt(double value, double range) {
-    if (range >= 20) return value.toStringAsFixed(0);
-    if (range >= 5) return value.toStringAsFixed(1);
-    return value.toStringAsFixed(2);
-  }
-
-  String _dateLabel(DateTime? d, int index) =>
-      d == null ? '${index + 1}' : '${d.month}/${d.day}';
+      const SizedBox(width: 12),
+    ],
+  );
 
   // ───────────────────────── COVERAGE BANNER ─────────────────────────
 
@@ -556,7 +565,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     final hasDates = _covStart != null || _covEnd != null;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.darkGreen,
         borderRadius: BorderRadius.circular(AppRadius.card),
@@ -604,364 +613,324 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     );
   }
 
-  // ───────────────────────── CARD 1: Correlations ─────────────────────────
+  // ───────────────────────── SENSOR SELECTOR ─────────────────────────
 
-  Widget _buildCorrelationCard() {
-    return _card(
-      title: 'Sensor Correlations',
-      subtitle: 'Strongest relationships between sensor readings',
-      height: 200,
-      body: _buildCorrelationChart(),
-      footer: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _legendDot(AppColors.healthy, 'Move together (+)'),
-              _legendDot(AppColors.critical, 'Move opposite (−)'),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Top 6 pairs by strength. Values near ±1 mean a strong '
-            'relationship; near 0 means little or none. Tap a bar for details.',
-            style: AppText.caption,
-          ),
-        ],
-      ),
-    );  
+  // Keeps the minimap thumb in sync with the chip row.
+  bool _onChipScroll(Notification n) {
+    final m = n is ScrollNotification
+        ? n.metrics
+        : n is ScrollMetricsNotification
+        ? n.metrics
+        : null;
+    if (m == null || m.viewportDimension <= 0) return false;
+    final total = m.maxScrollExtent + m.viewportDimension;
+    final size = (m.viewportDimension / total).clamp(0.05, 1.0);
+    final start = m.maxScrollExtent <= 0
+        ? 0.0
+        : (m.pixels / m.maxScrollExtent).clamp(0.0, 1.0) * (1 - size);
+    final next = (start, size);
+    // ScrollMetricsNotification can fire mid-layout, where changing a
+    // listened-to value triggers "Build scheduled during frame".
+    final phase = WidgetsBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle ||
+        phase == SchedulerPhase.postFrameCallbacks) {
+      _mini.value = next;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _mini.value = next;
+      });
+    }
+    return false;
   }
 
-  Widget _buildCorrelationChart() {
-    if (_edaLoading) return const Center(child: CircularProgressIndicator());
-    if (_edaError != null) return _errorBody(_edaError!, _fetchEda);
-    if (_topCorrelations.isEmpty) {
-      return _emptyBody(
-        'No correlation data yet for this crop.',
-      );
-    }
+  // Slim track + thumb under the chips. Tap or drag it to move through chips.
+  Widget _buildChipMinimap() {
+    return LayoutBuilder(
+      builder: (context, box) {
+        final w = box.maxWidth;
+        void jump(double dx) {
+          if (!_chipScroll.hasClients) return;
+          final thumbW = w * _mini.value.$2;
+          final frac = w <= thumbW
+              ? 0.0
+              : ((dx - thumbW / 2) / (w - thumbW)).clamp(0.0, 1.0);
+          _chipScroll.jumpTo(frac * _chipScroll.position.maxScrollExtent);
+        }
 
-    final groups = <BarChartGroupData>[
-      for (int i = 0; i < _topCorrelations.length; i++)
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: _topCorrelations[i].value,
-              color: _topCorrelations[i].value >= 0
-                  ? AppColors.healthy
-                  : AppColors.critical,
-              width: 22,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ],
-        ),
-    ];
+        Widget bar(double width, Color color) => Container(
+          height: 4,
+          width: width,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        );
 
-    return BarChart(
-      BarChartData(
-        minY: -1,
-        maxY: 1,
-        alignment: BarChartAlignment.spaceAround,
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 0.5,
-          getDrawingHorizontalLine: (value) => FlLine(
-            color: value == 0 ? AppColors.textTertiary : AppColors.track,
-            strokeWidth: 1,
-          ),
-        ),
-        borderData: FlBorderData(show: false),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 32,
-              interval: 0.5,
-              getTitlesWidget: (value, meta) => Text(
-                value.toStringAsFixed(1),
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppColors.textSecondary,
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (d) => jump(d.localPosition.dx),
+          onHorizontalDragUpdate: (d) => jump(d.localPosition.dx),
+          child: SizedBox(
+            height: 14,
+            child: Center(
+              child: ValueListenableBuilder<(double, double)>(
+                valueListenable: _mini,
+                builder: (_, v, _) => Stack(
+                  children: [
+                    bar(w, Colors.grey.shade300),
+                    Positioned(
+                      left: v.$1 * w,
+                      child: bar(v.$2 * w, Colors.grey.shade600),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 34,
-              getTitlesWidget: (value, meta) {
-                final i = value.toInt();
-                if (i < 0 || i >= _topCorrelations.length) {
-                  return const SizedBox.shrink();
-                }
-                final p = _topCorrelations[i];
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    '${_short(p.a)}\n${_short(p.b)}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 9,
-                      color: AppColors.textSecondary,
+        );
+      },
+    );
+  }
+
+  // One sensor picker for the whole page: scrolling filter chips plus a
+  // minimap slider. Tapping a chip centres it; the minimap follows.
+  Widget _buildSensorSelector() {
+    return Column(
+      children: [
+        SizedBox(
+          height: 40,
+          child: NotificationListener<Notification>(
+            onNotification: _onChipScroll,
+            child: ListView.separated(
+              controller: _chipScroll,
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: kSensors.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final d = kSensors[i];
+                final selected = d.key == _statKey;
+                return FilterChip(
+                  key: _chipKeys[i],
+                  label: Text(
+                    d.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? Colors.white : AppColors.textPrimary,
                     ),
                   ),
+                  selected: selected,
+                  showCheckmark: false,
+                  selectedColor: AppColors.green,
+                  backgroundColor: Colors.white,
+                  side: BorderSide(
+                    color: selected ? AppColors.green : AppColors.track,
+                  ),
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  onSelected: (_) {
+                    _selectSensor(d.key);
+                    final ctx = _chipKeys[i].currentContext;
+                    if (ctx != null) {
+                      Scrollable.ensureVisible(
+                        ctx,
+                        alignment: 0.5,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOutCubic,
+                      );
+                    }
+                  },
                 );
               },
             ),
           ),
         ),
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (group) => AppColors.textPrimary,
-            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-              final p = _topCorrelations[groupIndex];
-              return BarTooltipItem(
-                '${p.a} ↔ ${p.b}\n${p.value.toStringAsFixed(2)}',
-                const TextStyle(color: Colors.white, fontSize: 12),
-              );
-            },
-          ),
-        ),
-        barGroups: groups,
-      ),
+        const SizedBox(height: 2),
+        _buildChipMinimap(),
+      ],
     );
   }
 
-  // ───────────────────────── CARD 2: Target breakdown ─────────────────────────
+  // ───────────────────────── CARD: Weekly average ─────────────────────────
 
-  Widget _buildBreakdownCard() {
-    final metrics = _breakdown.keys.toList();
-
-    return SizedBox(
-      width: double.infinity,
-      child: AppCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Readings by Crop Health', style: AppText.cardTitle),
-            const SizedBox(height: 2),
-            const Text(
-              'Average sensor value for each health status',
-              style: AppText.subtitle,
-            ),
-            const SizedBox(height: 10),
-            if (metrics.isNotEmpty)
-              SizedBox(
-                height: 34,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: metrics.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, i) {
-                    final m = metrics[i];
-                    final selected = m == _selectedMetric;
-                    return ChoiceChip(
-                      label: Text(
-                        m.replaceAll('_', ' '),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: selected
-                              ? Colors.white
-                              : AppColors.textPrimary,
-                        ),
-                      ),
-                      selected: selected,
-                      selectedColor: AppColors.green,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() => _selectedMetric = m),
-                    );
-                  },
-                ),
-              ),
-            const SizedBox(height: 12),
-            SizedBox(height: 190, child: _buildBreakdownChart()),
-            const SizedBox(height: 6),
-            const Text(
-              'Shows what each sensor typically reads when the crop is in each '
-              'status, so you can see which readings go with healthy vs. '
-              'stressed conditions.',
-              style: AppText.caption,
-            ),
-          ],
-        ),
-      ),
+  Widget _buildWeeklyCard() {
+    final def = _selectedDef;
+    final pts = _weekly.data;
+    return _card(
+      title: 'Weekly Average',
+      subtitle: pts.isEmpty
+          ? def.label
+          : '${def.label} · weeks ending '
+                '${_fmtRange(pts.first.weekEnd, pts.last.weekEnd)}',
+      body: _buildWeeklyChart(def),
+      caption:
+          'Each bar is one week\'s average, labelled by the week-end date. '
+          'Tap a bar to see how many readings it is based on. '
+          'Recent weeks may be partial.',
     );
   }
+
+  Widget _buildWeeklyChart(SensorDef def) {
+    if (_notReady(_weekly.loading, _weekly.error, _fetchWeekly) case final w?) {
+      return w;
+    }
+    final pts = _weekly.data;
+    if (pts.isEmpty) {
+      return _emptyBody('No ${def.label} data yet for this crop.');
+    }
+
+    final maxVal = pts.map((p) => p.mean).reduce((a, b) => a > b ? a : b);
+    final maxY = maxVal <= 0 ? 1.0 : maxVal * 1.2;
+    return _barChart(
+      maxY: maxY,
+      interval: maxY / 4,
+      values: [for (final p in pts) p.mean],
+      colors: List.filled(pts.length, AppColors.healthy),
+      barWidth: pts.length > 8 ? 16 : 22,
+      leftSize: 40,
+      leftLabel: (v) => _axisFmt(v, maxY),
+      bottomSize: 24,
+      bottom: (i) => _tick(_dateLabel(pts[i].weekEnd, i)),
+      tip: (i) =>
+          'Week ending ${_dateLabel(pts[i].weekEnd, i)}\n'
+          '${pts[i].mean.toStringAsFixed(def.decimals)}${def.unit}\n'
+          '${pts[i].n ?? '--'} readings',
+    );
+  }
+
+  // ───────────────────────── CARD: Target breakdown ─────────────────────────
+
+  Widget _buildBreakdownCard() => _card(
+    title: 'Readings by Crop Health',
+    subtitle: '${_selectedDef.label} · average value for each health status',
+    height: 190,
+    body: _buildBreakdownChart(),
+    caption:
+        'Shows what each sensor typically reads when the crop is in each '
+        'status, so you can see which readings go with healthy vs. '
+        'stressed conditions.',
+  );
 
   Widget _buildBreakdownChart() {
-    if (_edaLoading) return const Center(child: CircularProgressIndicator());
-    if (_edaError != null) return _errorBody(_edaError!, _fetchEda);
-
-    final data = _selectedMetric == null ? null : _breakdown[_selectedMetric];
+    if (_notReady(_edaLoading, _edaError, _fetchEda) case final w?) return w;
+    final data = _sensorBreakdown;
     if (data == null || data.isEmpty) {
       return _emptyBody(
-        'No breakdown data yet for this crop',
+        'No ${_selectedDef.label} breakdown data yet for this crop',
       );
     }
 
     // Healthiest status first (Optimal → Warning → Critical).
     final labels = data.keys.toList()
       ..sort((a, b) {
-        final sa = _scoreForCropHealth(a) ?? -1;
-        final sb = _scoreForCropHealth(b) ?? -1;
-        final c = sb.compareTo(sa);
+        final c = (_scoreForCropHealth(b) ?? -1).compareTo(
+          _scoreForCropHealth(a) ?? -1,
+        );
         return c != 0 ? c : a.compareTo(b);
       });
-
     final maxVal = labels.map((l) => data[l]!).reduce((a, b) => a > b ? a : b);
     final maxY = maxVal <= 0 ? 1.0 : maxVal * 1.2;
 
-    final groups = <BarChartGroupData>[
-      for (int i = 0; i < labels.length; i++)
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: data[labels[i]]!,
-              color: _colorForCropHealth(labels[i]),
-              width: 28,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ],
-        ),
-    ];
-
-    return BarChart(
-      BarChartData(
-        minY: 0,
-        maxY: maxY,
-        alignment: BarChartAlignment.spaceAround,
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: maxY / 4,
-          getDrawingHorizontalLine: (value) =>
-              const FlLine(color: AppColors.track, strokeWidth: 1),
-        ),
-        borderData: FlBorderData(show: false),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 40,
-              interval: maxY / 4,
-              getTitlesWidget: (value, meta) => Text(
-                value.toStringAsFixed(value.abs() >= 100 ? 0 : 1),
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 34,
-              getTitlesWidget: (value, meta) {
-                final i = value.toInt();
-                if (i < 0 || i >= labels.length) {
-                  return const SizedBox.shrink();
-                }
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    labels[i].replaceFirst(' ', '\n'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 9,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (group) => AppColors.textPrimary,
-            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-              return BarTooltipItem(
-                '${labels[groupIndex]}\n${rod.toY.toStringAsFixed(2)}',
-                const TextStyle(color: Colors.white, fontSize: 12),
-              );
-            },
-          ),
-        ),
-        barGroups: groups,
-      ),
+    return _barChart(
+      maxY: maxY,
+      interval: maxY / 4,
+      values: [for (final l in labels) data[l]!],
+      colors: [for (final l in labels) _colorForCropHealth(l)],
+      barWidth: 28,
+      leftSize: 40,
+      leftLabel: (v) => v.toStringAsFixed(v.abs() >= 100 ? 0 : 1),
+      bottomSize: 34,
+      bottom: (i) => _tick(labels[i].replaceFirst(' ', '\n')),
+      tip: (i) => '${labels[i]}\n${data[labels[i]]!.toStringAsFixed(2)}',
     );
   }
 
-  // ───────────────────────── CARD 3: Daily rolling average ─────────────────────────
+  // ───────────────────────── CARD: Correlations ─────────────────────────
+
+  Widget _buildCorrelationCard() => _card(
+    title: 'Sensor Correlations',
+    subtitle: '${_selectedDef.label} compared with the other sensors',
+    body: _buildCorrelationChart(),
+    footer: [
+      Row(
+        children: [
+          _legendDot(AppColors.healthy, 'Move together (+)'),
+          _legendDot(AppColors.critical, 'Move opposite (−)'),
+        ],
+      ),
+      const SizedBox(height: 4),
+    ],
+    caption:
+        'Every pair involving this sensor, strongest first. Values near ±1 '
+        'mean a strong relationship; near 0 means little or none. '
+        'Tap a bar for details.',
+  );
+
+  Widget _buildCorrelationChart() {
+    if (_notReady(_edaLoading, _edaError, _fetchEda) case final w?) return w;
+    final corr = _sensorCorrelations;
+    if (corr.isEmpty) {
+      return _emptyBody(
+        'No correlation data yet for ${_selectedDef.label} on this crop.',
+      );
+    }
+    return _barChart(
+      minY: -1,
+      maxY: 1,
+      interval: 0.5,
+      zeroLine: true,
+      values: [for (final p in corr) p.value],
+      colors: [
+        for (final p in corr)
+          p.value >= 0 ? AppColors.healthy : AppColors.critical,
+      ],
+      barWidth: 22,
+      leftSize: 32,
+      leftLabel: (v) => v.toStringAsFixed(1),
+      bottomSize: 34,
+      bottom: (i) => _tick('${_short(corr[i].a)}\n${_short(corr[i].b)}'),
+      tip: (i) =>
+          '${corr[i].a} ↔ ${corr[i].b}\n${corr[i].value.toStringAsFixed(2)}',
+    );
+  }
+
+  // ───────────────────── CARD: Daily rolling average ─────────────────────
 
   Widget _buildDailyCard() {
     final def = _selectedDef;
-    return SizedBox(
-      width: double.infinity,
-      child: AppCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final pts = _daily.data;
+    return _card(
+      title: 'Daily Rolling Average',
+      subtitle: pts.isEmpty
+          ? def.label
+          : '${def.label} · ${_fmtRange(pts.first.day, pts.last.day)}',
+      body: _buildDailyChart(def),
+      footer: [
+        Wrap(
           children: [
-            const Text('Daily Rolling Average', style: AppText.cardTitle),
-            const SizedBox(height: 2),
-            Text(
-              _daily.isEmpty
-                  ? def.label
-                  : '${def.label} · ${_fmtRange(_daily.first.day, _daily.last.day)}',
-              style: AppText.subtitle,
-            ),
-            const SizedBox(height: 10),
-            _sensorChips(),
-            const SizedBox(height: 12),
-            SizedBox(height: 200, child: _buildDailyChart(def)),
-            const SizedBox(height: 6),
-            Wrap(
-              children: [
-                _legendDot(AppColors.healthy, '7-day rolling mean'),
-                _legendDot(AppColors.info, 'Daily mean'),
-                _legendDot(
-                  AppColors.optimal.withOpacity(0.35),
-                  'Optimal: ${def.optimalText}',
-                ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            const Text(
-              'The rolling mean smooths out day-to-day noise so you can see '
-              'whether a sensor is drifting. The green band appears only '
-              'when the optimal range overlaps the data.',
-              style: AppText.caption,
+            _legendDot(AppColors.healthy, '7-day rolling mean'),
+            _legendDot(AppColors.info, 'Daily mean'),
+            _legendDot(
+              AppColors.optimal.withOpacity(0.35),
+              'Optimal: ${def.optimalText}',
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 2),
+      ],
+      caption:
+          'The rolling mean smooths out day-to-day noise so you can see '
+          'whether a sensor is drifting. The green band appears only '
+          'when the optimal range overlaps the data.',
     );
   }
 
   Widget _buildDailyChart(SensorDef def) {
-    if (_dailyLoading) return const Center(child: CircularProgressIndicator());
-    if (_dailyError != null) return _errorBody(_dailyError!, _fetchDaily);
-
-    final pts = _daily;
+    if (_notReady(_daily.loading, _daily.error, _fetchDaily) case final w?) {
+      return w;
+    }
+    final pts = _daily.data;
     final all = <double>[
       for (final p in pts) ...[
         if (p.daily != null) p.daily!,
@@ -969,22 +938,18 @@ class _AiAnalyticsState extends State<AiAnalytics> {
       ],
     ];
     if (pts.length < 2 || all.isEmpty) {
-      return _emptyBody(
-        'No ${def.label} data yet for this crop',
-      );
+      return _emptyBody('No ${def.label} data yet for this crop');
     }
 
-    double lo = all.reduce((a, b) => a < b ? a : b);
-    double hi = all.reduce((a, b) => a > b ? a : b);
+    var lo = all.reduce((a, b) => a < b ? a : b);
+    var hi = all.reduce((a, b) => a > b ? a : b);
     if (hi - lo < 1e-9) {
       hi += 1;
       lo -= 1;
     }
     final pad = (hi - lo) * 0.1;
-    final minY = lo - pad;
-    final maxY = hi + pad;
+    final minY = lo - pad, maxY = hi + pad;
     final range = maxY - minY;
-    final xInterval = (pts.length / 5).ceilToDouble().clamp(1.0, 1000.0);
     final showBand = def.max >= minY && def.min <= maxY;
 
     List<FlSpot> spots(double? Function(_DailyPt) pick) => [
@@ -999,13 +964,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
         minX: 0,
         maxX: (pts.length - 1).toDouble(),
         clipData: const FlClipData.all(),
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: range / 4,
-          getDrawingHorizontalLine: (_) =>
-              const FlLine(color: AppColors.track, strokeWidth: 1),
-        ),
+        gridData: _grid(range / 4),
         borderData: FlBorderData(show: false),
         rangeAnnotations: RangeAnnotations(
           horizontalRangeAnnotations: showBand
@@ -1018,50 +977,15 @@ class _AiAnalyticsState extends State<AiAnalytics> {
                 ]
               : const [],
         ),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 40,
-              interval: range / 4,
-              getTitlesWidget: (value, meta) => Text(
-                _axisFmt(value, range),
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 24,
-              interval: xInterval,
-              getTitlesWidget: (value, meta) {
-                final i = value.toInt();
-                if (value != i.toDouble() || i < 0 || i >= pts.length) {
-                  return const SizedBox.shrink();
-                }
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    _dateLabel(pts[i].day, i),
-                    style: const TextStyle(
-                      fontSize: 9,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+        titlesData: _titles(
+          leftSize: 40,
+          interval: range / 4,
+          leftLabel: (v) => _axisFmt(v, range),
+          bottomSize: 24,
+          bottomInterval: (pts.length / 5).ceilToDouble().clamp(1.0, 1000.0),
+          bottom: (i) => i < 0 || i >= pts.length
+              ? null
+              : _tick(_dateLabel(pts[i].day, i)),
         ),
         lineTouchData: LineTouchData(
           touchTooltipData: LineTouchTooltipData(
@@ -1077,7 +1001,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
                   '${_dateLabel(p.day, i)}\n'
                   'Rolling: ${f(p.rolling)}${def.unit}\n'
                   'Daily: ${f(p.daily)}${def.unit}',
-                  const TextStyle(color: Colors.white, fontSize: 12),
+                  _tooltipStyle,
                 ),
                 // Other touched bars get an empty tooltip so only one shows.
                 for (int k = 1; k < touched.length; k++)
@@ -1090,7 +1014,6 @@ class _AiAnalyticsState extends State<AiAnalytics> {
           // Daily mean (thin, behind)
           LineChartBarData(
             spots: spots((p) => p.daily),
-            isCurved: false,
             color: AppColors.info.withOpacity(0.7),
             barWidth: 1.5,
             dotData: const FlDotData(show: true),
@@ -1113,159 +1036,14 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     );
   }
 
-  // ───────────────────────── CARD 4: Weekly average ─────────────────────────
-
-  Widget _buildWeeklyCard() {
-    final def = _selectedDef;
-    return SizedBox(
-      width: double.infinity,
-      child: AppCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Weekly Average', style: AppText.cardTitle),
-            const SizedBox(height: 2),
-            Text(
-              _weekly.isEmpty
-                  ? def.label
-                  : '${def.label} · weeks ending '
-                        '${_fmtRange(_weekly.first.weekEnd, _weekly.last.weekEnd)}',
-              style: AppText.subtitle,
-            ),
-            const SizedBox(height: 10),
-            _sensorChips(),
-            const SizedBox(height: 12),
-            SizedBox(height: 200, child: _buildWeeklyChart(def)),
-            const SizedBox(height: 6),
-            const Text(
-              'Each bar is one week\'s average, labelled by the week-end '
-              'date. Tap a bar to see how many readings it is based on. '
-              'Recent weeks may be partial.',
-              style: AppText.caption,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWeeklyChart(SensorDef def) {
-    if (_weeklyLoading) return const Center(child: CircularProgressIndicator());
-    if (_weeklyError != null) return _errorBody(_weeklyError!, _fetchWeekly);
-
-    final pts = _weekly;
-    if (pts.isEmpty) {
-      return _emptyBody(
-        'No ${def.label} data yet for this crop.',
-      );
-    }
-
-    final maxVal = pts.map((p) => p.mean).reduce((a, b) => a > b ? a : b);
-    final maxY = maxVal <= 0 ? 1.0 : maxVal * 1.2;
-
-    return BarChart(
-      BarChartData(
-        minY: 0,
-        maxY: maxY,
-        alignment: BarChartAlignment.spaceAround,
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: maxY / 4,
-          getDrawingHorizontalLine: (_) =>
-              const FlLine(color: AppColors.track, strokeWidth: 1),
-        ),
-        borderData: FlBorderData(show: false),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 40,
-              interval: maxY / 4,
-              getTitlesWidget: (value, meta) => Text(
-                _axisFmt(value, maxY),
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 24,
-              getTitlesWidget: (value, meta) {
-                final i = value.toInt();
-                if (i < 0 || i >= pts.length) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    _dateLabel(pts[i].weekEnd, i),
-                    style: const TextStyle(
-                      fontSize: 9,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (_) => AppColors.textPrimary,
-            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-              final p = pts[groupIndex];
-              return BarTooltipItem(
-                'Week ending ${_dateLabel(p.weekEnd, groupIndex)}\n'
-                '${p.mean.toStringAsFixed(def.decimals)}${def.unit}\n'
-                '${p.n ?? '--'} readings',
-                const TextStyle(color: Colors.white, fontSize: 12),
-              );
-            },
-          ),
-        ),
-        barGroups: [
-          for (int i = 0; i < pts.length; i++)
-            BarChartGroupData(
-              x: i,
-              barRods: [
-                BarChartRodData(
-                  toY: pts[i].mean,
-                  width: pts.length > 8 ? 16 : 22,
-                  borderRadius: BorderRadius.circular(4),
-                  color: AppColors.healthy,
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
   // ───────────────────────── PAGE ─────────────────────────
-
-  Future<void> _refreshAll() => Future.wait([
-    _fetchEda(showSpinner: false),
-    _fetchCoverage(),
-    _fetchDaily(showSpinner: false),
-    _fetchWeekly(showSpinner: false),
-  ]);
 
   @override
   Widget build(BuildContext context) {
+    const gap = SizedBox(height: AppSpace.cardGap);
     return Column(
       children: [
         const AppHeader(title: 'AI Analytics'),
-
         // Scrollable body (pull down to refresh)
         Expanded(
           child: RefreshIndicator(
@@ -1278,15 +1056,17 @@ class _AiAnalyticsState extends State<AiAnalytics> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildCoverageBanner(),
-                  const SizedBox(height: AppSpace.cardGap),
-                  _buildDailyCard(),
-                  const SizedBox(height: AppSpace.cardGap),
+                  gap,
+                  _buildSensorSelector(),
+                  gap,
                   _buildWeeklyCard(),
-                  const SizedBox(height: AppSpace.cardGap),
+                  gap,
                   _buildBreakdownCard(),
-                  const SizedBox(height: AppSpace.cardGap),
+                  gap,
                   _buildCorrelationCard(),
-                  const SizedBox(height: AppSpace.cardGap),
+                  gap,
+                  _buildDailyCard(), // Daily Rolling Average is the last graph
+                  gap,
                 ],
               ),
             ),

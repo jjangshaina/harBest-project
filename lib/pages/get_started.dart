@@ -87,7 +87,7 @@ class _GetStartedState extends State<GetStarted> {
   late final TapGestureRecognizer _privacyTap = TapGestureRecognizer()
     ..onTap = _onPrivacyTap;
 
-  // TODO: open the real Terms of Service page once it is written.
+  //TODO: open the real Terms of Service page once it is written.
   void _onTermsTap() {
     AppSnack.show(context, 'Terms of Service will be available soon.');
   }

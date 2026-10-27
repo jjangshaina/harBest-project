@@ -16,7 +16,7 @@ class AppBottomNav extends StatelessWidget {
     AppIcons.home,
     AppIcons.analytics,
     AppIcons.plant,
-    AppIcons.insights,
+    AppIcons.forecast,
     AppIcons.alerts,
   ];
 
@@ -24,7 +24,7 @@ class AppBottomNav extends StatelessWidget {
     'Home',
     'Analytics',
     'Plant',
-    'Insights',
+    'Forecast',
     'Alerts',
   ];
 

@@ -8,22 +8,27 @@ import 'pages/user_dashboard.dart';
 import 'firebase_options.dart';
 import 'theme/app_style.dart';
 
+
+  const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initializing Firebase for auth & app data
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
+    throw StateError('Run with --dart-define-from-file=env.json');
+  }
 
   // Initializing Supabase for sensor data from Raspberry Pi
   await Supabase.initialize(
-    
-  url: 'https://vdginsecbpsqdayqugtg.supabase.co',
-  anonKey: 'sb_publishable_SCZV5hZeFBgFChWKvkE1Ig_4_4P1kOH',
-  accessToken: () async =>
-      await fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
-);
+    url: _supabaseUrl,
+    anonKey: _supabaseAnonKey,
+    accessToken: () async =>
+        await fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
+  );
 
   runApp(const MyApp());
 }

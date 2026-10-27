@@ -7,7 +7,7 @@ import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 import 'package:flutter_application_harbest_1/pages/user_account.dart';
 import 'package:flutter_application_harbest_1/analytics/ai_analytics.dart';
 import 'package:flutter_application_harbest_1/plant_profile/profile.dart';
-import 'package:flutter_application_harbest_1/Insights/insights_recommendation.dart';
+import 'package:flutter_application_harbest_1/forecasting/ai_forecasting.dart';
 import 'package:flutter_application_harbest_1/notification/alerts.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
@@ -61,7 +61,7 @@ class _MainNavigationState extends State<MainNavigation> {
     ),
     const AiAnalytics(),
     const PlantProfilePage(),
-    const InsightsRecommendation(),
+    const AiForecasting(),
     const AlertsPage(),
   ];
 
@@ -575,7 +575,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildCropImageCard() {
     final crop = CropService.instance.selected;
     final imageUrl = crop?.imageUrl ?? _sensorData['image_url'] as String?;
-    final plantName = crop?.name ?? 'Mustard Green';
+    final plantName = crop?.name ?? 'name';
 
     return Center(
       child: GestureDetector(

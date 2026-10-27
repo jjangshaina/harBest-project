@@ -216,7 +216,7 @@ class AppIcons {
   static const IconData home = CupertinoIcons.house;
   static const IconData analytics = CupertinoIcons.chart_bar;
   static const IconData plant = CupertinoIcons.leaf_arrow_circlepath;
-  static const IconData insights = CupertinoIcons.create;
+  static const IconData forecast = CupertinoIcons.graph_square;
   static const IconData alerts = CupertinoIcons.bell;
 
   // Actions
@@ -257,6 +257,8 @@ class AppIcons {
   static const IconData warning = CupertinoIcons.exclamationmark_triangle_fill;
   static const IconData tip = CupertinoIcons.lightbulb;
   static const IconData alertsOff = CupertinoIcons.bell_slash_fill;
+  static const IconData add = CupertinoIcons.add;
+  static const IconData done = CupertinoIcons.checkmark;
 
   // forms
   static const IconData visible = CupertinoIcons.eye;

@@ -80,7 +80,7 @@ class AppHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (trailing != null) trailing!,
+          ?trailing,
         ],
       ),
     );
@@ -106,7 +106,7 @@ class AppHeader extends StatelessWidget {
                     backgroundAsset!,
                     fit: BoxFit.cover,
                     // Falls back to plain green if the picture can't load.
-                    errorBuilder: (_, __, ___) =>
+                    errorBuilder: (_, _, _) =>
                         const ColoredBox(color: AppColors.green),
                   ),
                   ColoredBox(color: AppColors.green.withOpacity(0.55)),
