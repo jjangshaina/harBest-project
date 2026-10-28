@@ -396,6 +396,15 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   Timer? _peekTimer;
   Offset _peekDownPos = Offset.zero;
 
+  // Page scroll: used to bring the stage card fully into view when it opens,
+  // and to drive the "back to top" button.
+  final ScrollController _scroll = ScrollController();
+  final GlobalKey _scrollKey = GlobalKey(); // the scrolling area
+  final GlobalKey _peekCardKey = GlobalKey(); // the stage details card
+  bool _showTop = false;
+  // How close (in pixels) to the bottom before the button appears.
+  static const double _showTopWithin = 400;
+
   // Newest readings kept. The latest one drives the conditions; the whole
   // window feeds the trend notes in the recommendations.
   static const int _recentReadingsWindow = 20;
@@ -403,6 +412,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onPageScroll);
     CropService.instance.addListener(_onCropChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _loadHidden();
@@ -417,6 +427,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   void dispose() {
     _timer?.cancel();
     _peekTimer?.cancel();
+    _scroll.dispose();
     CropService.instance.removeListener(_onCropChanged);
     super.dispose();
   }
@@ -428,6 +439,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       _recentReadings = [];
       _recs = [];
       _readingsError = null;
+      _showTop = false;
     });
     _fetchAll();
   }
@@ -501,6 +513,74 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         );
       }
     }
+  }
+
+  // --- Back to top ------------------------------------------------------------
+
+  // Show the button only when the user is near the bottom of the page.
+  void _onPageScroll() {
+    if (!_scroll.hasClients) return;
+    final p = _scroll.position;
+    final near =
+        p.maxScrollExtent > 0 && p.pixels >= p.maxScrollExtent - _showTopWithin;
+    if (near != _showTop) setState(() => _showTop = near);
+  }
+
+  void _scrollToTop() {
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// Small round "top" button. It sits just above the "+" button.
+  Widget _buildBackToTop() {
+    return Positioned(
+      right: AppSpace.page + 5, // lines up with the centre of the 56px "+"
+      bottom: AppSpace.page + 56 + 12,
+      child: IgnorePointer(
+        ignoring: !_showTop,
+        child: AnimatedSlide(
+          offset: _showTop ? Offset.zero : const Offset(0, 0.6),
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+          child: AnimatedOpacity(
+            opacity: _showTop ? 1 : 0,
+            duration: const Duration(milliseconds: 250),
+            child: GestureDetector(
+              onTap: _scrollToTop,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.green,
+                  shape: BoxShape.circle,
+                  boxShadow: AppShadows.card,
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(AppIcons.up, size: 16, color: AppColors.onGreen),
+                    Text(
+                      'top',
+                      style: TextStyle(
+                        fontSize: 9,
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.onGreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // --- Recommendations: hide / snooze ---------------------------------------
@@ -819,9 +899,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         AppSpace.page,
-        MediaQuery.of(context).padding.top + 16,
+        MediaQuery.of(context).padding.top + 12,
         AppSpace.page,
-        8,
+        4,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -836,7 +916,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  /// Plant photo card. The day-of-growth text sits right under the photo.
+  /// Plant photo card (kept small so the timeline sits higher on the page).
+  /// The day-of-growth text sits right under the photo.
   Widget _buildCropImageCard() {
     final imageUrl =
         CropService.instance.selected?.imageUrl ??
@@ -845,8 +926,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
     return Center(
       child: AppCard(
-        radius: 20,
-        padding: const EdgeInsets.all(12),
+        radius: 16,
+        padding: const EdgeInsets.all(8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -856,12 +937,12 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               size: 200,
               enableZoom: true,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             if (days != null)
               Text(
                 'Day $days of growth',
                 style: AppText.body.copyWith(
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
               )
@@ -870,6 +951,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 'Planting date not set — tap + to add one.',
                 textAlign: TextAlign.center,
                 style: AppText.subtitle.copyWith(
+                  fontSize: 12,
                   color: AppColors.textTertiary,
                   fontStyle: FontStyle.italic,
                 ),
@@ -888,11 +970,43 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       _peekIndex = index;
       _peekVisible = true;
     });
+    // Once the card has been laid out, scroll just enough that all of it is
+    // on screen, so the user never has to scroll to read it.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealPeekCard());
   }
 
   void _hidePeek() {
     if (!_peekVisible) return;
     setState(() => _peekVisible = false);
+  }
+
+  /// Scrolls the page down by however much of the stage card sticks out
+  /// below the visible area. Does nothing if it already fits.
+  void _revealPeekCard() {
+    if (!mounted || !_peekVisible || !_scroll.hasClients) return;
+    final viewBox = _scrollKey.currentContext?.findRenderObject();
+    final cardBox = _peekCardKey.currentContext?.findRenderObject();
+    if (viewBox is! RenderBox || cardBox is! RenderBox) return;
+    if (!viewBox.hasSize || !cardBox.hasSize) return;
+
+    final viewBottom =
+        viewBox.localToGlobal(Offset(0, viewBox.size.height)).dy;
+    final cardBottom =
+        cardBox.localToGlobal(Offset(0, cardBox.size.height)).dy;
+    final overflow = cardBottom - (viewBottom - 12);
+    if (overflow <= 0) return;
+
+    final target = (_scroll.offset + overflow).clamp(
+      0.0,
+      _scroll.position.maxScrollExtent,
+    );
+    if (target > _scroll.offset) {
+      _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   // The stage steps use raw pointer events instead of a long-press gesture,
@@ -922,12 +1036,12 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     _hidePeek();
   }
 
-  /// Card with the dark green outline AND the soft shadow used by the cards
-  /// on the other pages (AppCard gives one or the other, so the shadow sits
-  /// on a wrapper).
+  /// Card with a gray outline AND the soft shadow used by the cards on the
+  /// other pages (AppCard gives one or the other, so the shadow sits on a
+  /// wrapper).
   Widget _outlinedShadowCard({
     required Widget child,
-    Color color = AppColors.darkGreen,
+    Color color = AppColors.disabledStart,
     EdgeInsetsGeometry padding = const EdgeInsets.all(14),
   }) {
     return Container(
@@ -949,32 +1063,32 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     final currentIndex = days != null ? _getCurrentStageIndex(days) : -1;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.only(top: 12),
       child: CompositedTransformTarget(
         link: _timelineLink,
         child: SizedBox(
-        width: double.infinity,
-        child: _outlinedShadowCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    AppIcons.timeline,
-                    color: AppColors.green,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text('Growth Stage Timeline', style: AppText.cardTitle),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _buildGrowthStepper(currentIndex),
-            ],
+          width: double.infinity,
+          child: _outlinedShadowCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      AppIcons.timeline,
+                      color: AppColors.green,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Growth Stage Timeline', style: AppText.cardTitle),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildGrowthStepper(currentIndex),
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -1009,12 +1123,15 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
         return Expanded(
           child: Listener(
+            // Only the current stage can be held to view its conditions.
             // Hold to view, release to close; scrolling still works.
             behavior: HitTestBehavior.opaque,
-            onPointerDown: (e) => _onStagePointerDown(i, e.position),
-            onPointerMove: (e) => _onStagePointerMove(e.position),
-            onPointerUp: (_) => _onStagePointerEnd(),
-            onPointerCancel: (_) => _onStagePointerEnd(),
+            onPointerDown:
+                isCurrent ? (e) => _onStagePointerDown(i, e.position) : null,
+            onPointerMove:
+                isCurrent ? (e) => _onStagePointerMove(e.position) : null,
+            onPointerUp: isCurrent ? (_) => _onStagePointerEnd() : null,
+            onPointerCancel: isCurrent ? (_) => _onStagePointerEnd() : null,
             child: Column(
               children: [
                 Row(
@@ -1095,7 +1212,10 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           child: AnimatedOpacity(
             opacity: _peekVisible ? 1 : 0,
             duration: const Duration(milliseconds: 150),
-            child: _buildStageDetails(index, daysSincePlanting),
+            child: KeyedSubtree(
+              key: _peekCardKey,
+              child: _buildStageDetails(index, daysSincePlanting),
+            ),
           ),
         ),
       ),
@@ -1151,30 +1271,30 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               child: _outlinedShadowCard(
                 // Gray border (matches the design).
                 color: AppColors.disabledStart,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       '${stage.title} (${stage.name})',
                       style: AppText.body.copyWith(
-                        fontSize: 15,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       'Day ${stage.minDay}–${stage.maxDay}',
-                      style: AppText.caption.copyWith(fontSize: 12),
+                      style: AppText.caption.copyWith(fontSize: 11.5),
                     ),
                     if (isCurrent) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       _stageBar(
                         (daysSincePlanting - stage.minDay) /
                             (stage.maxDay - stage.minDay),
                       ),
                     ],
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     _buildStageConditionsPanel(stage.name),
                   ],
                 ),
@@ -1212,12 +1332,12 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   /// the right, so names and values line up down each column.
   Widget _conditionChip(_ConditionFactor factor) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
       decoration: _chipDecoration,
       child: Row(
         children: [
           _statusDot(factor.status),
-          const SizedBox(width: 6),
+          const SizedBox(width: 5),
           Expanded(
             child: FittedBox(
               fit: BoxFit.scaleDown,
@@ -1226,19 +1346,19 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 factor.name,
                 maxLines: 1,
                 style: AppText.label.copyWith(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary,
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Text(
             factor.displayValue,
             maxLines: 1,
             style: AppText.label.copyWith(
-              fontSize: 12,
+              fontSize: 11.5,
               color: AppColors.textSecondary,
             ),
           ),
@@ -1251,26 +1371,26 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   Widget _npkChip(_ConditionFactor factor) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
       decoration: _chipDecoration,
       child: Row(
         children: [
           _statusDot(factor.status),
-          const SizedBox(width: 6),
+          const SizedBox(width: 5),
           Text(
             factor.name,
             style: AppText.label.copyWith(
-              fontSize: 12,
+              fontSize: 11.5,
               fontWeight: FontWeight.w700,
               color: AppColors.textPrimary,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               factor.displayValue,
               style: AppText.label.copyWith(
-                fontSize: 12,
+                fontSize: 11.5,
                 color: AppColors.textSecondary,
               ),
             ),
@@ -1297,7 +1417,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: AppColors.track,
         borderRadius: BorderRadius.circular(AppRadius.field),
@@ -1311,7 +1431,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 child: Text(
                   'OPTIMAL CONDITIONS',
                   style: AppText.label.copyWith(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w800,
                     color: AppColors.textPrimary,
                   ),
@@ -1320,8 +1440,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               if (score != null)
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
+                    horizontal: 10,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
                     color: AppColors.green.withOpacity(0.35),
@@ -1330,7 +1450,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                   child: Text(
                     '$score%',
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: FontWeight.w800,
                       color: AppColors.darkGreen,
                     ),
@@ -1338,21 +1458,21 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                 ),
             ],
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 1),
           Text(
             knownCount > 0
                 ? '$optimalCount out of $knownCount tracked factors optimal right now'
                 : 'No sensor data available yet',
-            style: AppText.caption.copyWith(fontSize: 11.5),
+            style: AppText.caption.copyWith(fontSize: 11),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           for (var i = 0; i < grid.length; i += 2)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
                   Expanded(child: _conditionChip(grid[i])),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: i + 1 < grid.length
                         ? _conditionChip(grid[i + 1])
@@ -1362,16 +1482,17 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               ),
             ),
           _npkChip(npk),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(AppIcons.tip, size: 14, color: AppColors.textSecondary),
+              const Icon(AppIcons.tip, size: 13, color: AppColors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   kStageConditions[stageName]!.npkGuidance,
                   style: AppText.caption.copyWith(
+                    fontSize: 10.5,
                     color: AppColors.textSecondary,
                     fontStyle: FontStyle.italic,
                   ),
@@ -1390,7 +1511,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   /// Critical counts. The recommendations themselves are separate cards below.
   Widget _buildInsightsCard() {
     return Padding(
-      padding: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.only(top: 12),
       child: SizedBox(
         width: double.infinity,
         child: _outlinedShadowCard(
@@ -1732,8 +1853,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     final hasCrop = CropService.instance.selected != null;
     final showEmpty = CropService.instance.loaded && !hasCrop;
 
-    // Stack so the round "+" button can float over the bottom-right corner
-    // of the page, above the bottom navigation bar.
+    // Stack so the round "+" and "top" buttons can float over the bottom-right
+    // corner of the page, above the bottom navigation bar.
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1755,9 +1876,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                           color: AppColors.green,
                           onRefresh: () => _fetchAll(silent: false),
                           child: SingleChildScrollView(
+                            key: _scrollKey,
+                            controller: _scroll,
                             physics: const AlwaysScrollableScrollPhysics(),
-                            // Extra bottom space so the floating button never
-                            // covers the last card.
+                            // Extra bottom space so the floating buttons never
+                            // cover the last card.
                             padding: const EdgeInsets.fromLTRB(
                               AppSpace.page,
                               AppSpace.gap,
@@ -1788,7 +1911,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           ],
         ),
 
-        if (hasCrop && !_isLoading)
+        if (hasCrop && !_isLoading) ...[
+          _buildBackToTop(),
           Positioned(
             right: AppSpace.page,
             bottom: AppSpace.page,
@@ -1803,6 +1927,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               child: const Icon(AppIcons.add),
             ),
           ),
+        ],
       ],
     );
   }

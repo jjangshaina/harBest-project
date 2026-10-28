@@ -231,6 +231,20 @@ class _DashboardScreenState extends State<DashboardScreen>
     with WidgetsBindingObserver {
   static const int _historyLength = 10;
 
+  // ── HEADER PICTURE ──
+  // Put your picture at this path and list it under `assets:` in pubspec.yaml.
+  static const String _headerImage = 'assets/urban_garden.jpg';
+
+  // The crop card sits in a fixed-height slot so the picture can end at the
+  // vertical middle of the plant photo (14px card padding + half of 160px).
+  static const double _cropCardHeight = 230;
+  static const double _headerOverlap = 14 + 80;
+
+  // White text with a soft shadow so it stays readable on any picture.
+  static const List<Shadow> _onPhotoShadow = [
+    Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1)),
+  ];
+
   final String _uid = FirebaseAuth.instance.currentUser!.uid;
   final _supabase = Supabase.instance.client;
 
@@ -493,7 +507,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   // Human-friendly "time ago" version of the same timestamp, e.g.
   // "Just now", "5 minutes ago", "3 hours ago", "2 days ago".
   //
-  // Uses its own helper so the "Last reading" text above stays untouched.
   // The stored clock fields (e.g. 12:03) are already the real local time
   // but labeled +00, so we rebuild them as a LOCAL DateTime before
   // comparing against DateTime.now().
@@ -532,7 +545,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ── HEADER GREETING ──
   // "Good Morning" (before 12:00), "Good Afternoon" (12:00–17:59),
   // "Good Evening" (18:00 onward), based on the device's local time.
-  // The 30s ticker above rebuilds the screen, so this stays current.
   String _greetingForNow() {
     final hour = DateTime.now().hour;
     if (hour < 12) return 'Good Morning';
@@ -572,10 +584,199 @@ class _DashboardScreenState extends State<DashboardScreen>
     return 'there';
   }
 
+  // ───────────────────────── HEADER (picture) ─────────────────────────
+
+  /// Picture + dark fade behind the header text. Same footprint as the old
+  /// green header: from the top of the screen down to the middle of the
+  /// plant photo, with the same rounded bottom corners.
+  Widget _buildHeaderPicture() {
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+        bottomLeft: Radius.circular(50),
+        bottomRight: Radius.circular(50),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            _headerImage,
+            fit: BoxFit.cover,
+            // Plain green if the picture is missing, so the page still works.
+            errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.green),
+          ),
+          // Darkens the top where the text sits, fades out toward the bottom.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.55),
+                  Colors.black.withOpacity(0.28),
+                  Colors.black.withOpacity(0.05),
+                ],
+                stops: const [0, 0.55, 1],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderTexts() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 60, left: 20, right: 20, bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                AppIcons.plant,
+                color: Colors.white,
+                size: 26,
+                shadows: _onPhotoShadow,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'HarBest: Dashboard',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    shadows: _onPhotoShadow,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const UserAccount()),
+                  );
+                },
+                behavior: HitTestBehavior.opaque,
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(
+                    AppIcons.account,
+                    color: Colors.white,
+                    size: 30,
+                    shadows: _onPhotoShadow,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${_greetingForNow()}, ${_userFirstName()}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              shadows: _onPhotoShadow,
+            ),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            "Let's grow your crop!",
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              shadows: _onPhotoShadow,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCropSwitcherButton() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 14),
+      child: Center(
+        child: GestureDetector(
+          onTap: _openCropSwitcher,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  child: Text(
+                    CropService.instance.selected?.name ?? 'Choose crop',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(
+                  AppIcons.expand,
+                  size: 16,
+                  color: AppColors.textPrimary,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Picture behind, header text + crop card in front. The picture ends at
+  /// the middle of the plant photo (see [_headerOverlap]).
+  Widget _buildHeader() {
+    final showSwitcher =
+        CropService.instance.crops.length > 1 ||
+        CropService.instance.crops.any(
+          (c) => c.ownerUid != FirebaseAuth.instance.currentUser?.uid,
+        );
+
+    return Stack(
+      children: [
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: _cropCardHeight - _headerOverlap,
+          child: _buildHeaderPicture(),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildHeaderTexts(),
+            if (showSwitcher) _buildCropSwitcherButton(),
+            SizedBox(height: _cropCardHeight, child: _buildCropImageCard()),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // Gray card, no border, no shadow.
   Widget _buildCropImageCard() {
     final crop = CropService.instance.selected;
     final imageUrl = crop?.imageUrl ?? _sensorData['image_url'] as String?;
-    final plantName = crop?.name ?? 'name';
+    final plantName = crop?.name ?? '';
 
     return Center(
       child: GestureDetector(
@@ -584,7 +785,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         },
         child: AppCard(
           radius: 20,
-          outlineColor: AppColors.darkGreen,
           padding: const EdgeInsets.all(14),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -605,7 +805,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   Container(
                     padding: const EdgeInsets.all(5),
                     decoration: const BoxDecoration(
-                      color: AppColors.green,
+                      color: AppColors.darkGreen,
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -635,9 +835,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // Scores a single sensor reading against its optimal range: 100
   // inside the range, tapering down the further outside it falls,
-  // reaching 0 once the deviation reaches `tolerance` (a per-sensor
-  // buffer, not just the raw width of the optimal band — this keeps
-  // narrow-range sensors like pH from being scored unfairly harshly).
+  // reaching 0 once the deviation reaches `tolerance`.
   double? _rangeScore(dynamic raw, double min, double max, double tolerance) {
     final value = _parseNum(raw);
     if (value == null) return null;
@@ -655,15 +853,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     return HealthLevel.critical;
   }
 
-  // Every sensor tracked on the dashboard, its optimal range, how far
-  // outside that range it can drift before scoring 0, and how much it
-  // should count toward the overall score.
-
-  // moisture 25%,
-  // pH 20%, NPK (combined) 20%, temperature 15%, humidity 10%,
-  // heat index 5%. Weights don't need to sum to 100 — the scoring
-  // below renormalizes by whatever weights are present, so only the
-  // ratios between them matter.
+  // moisture 25%, pH 20%, NPK (combined) 20%, temperature 15%,
+  // humidity 10%, heat index 5%. Weights are renormalized by whatever is
+  // present, so only the ratios matter.
   static const List<Map<String, dynamic>> _sensorScoreConfig = [
     {'key': 'pH', 'min': 6.0, 'max': 7.0, 'tolerance': 1.5, 'weight': 0.20},
     {
@@ -696,10 +888,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     },
   ];
 
-  // Nitrogen, phosphorus and potassium are folded into one combined
-  // "NPK" factor (weighted 20% overall, see _npkWeight below) rather
-  // than scored individually — the three are averaged together first,
-  // so no single nutrient dominates the composite score.
+  // Nitrogen, phosphorus and potassium are averaged into one "NPK" factor.
   static const List<Map<String, dynamic>> _npkScoreConfig = [
     {'key': 'nitrogen', 'min': 30.0, 'max': 3000.0, 'tolerance': 30.0},
     {'key': 'phosphorus', 'min': 20.0, 'max': 3000.0, 'tolerance': 20.0},
@@ -708,8 +897,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   static const double _npkWeight = 0.20;
 
   // crop_health may come through as a numeric score (0-100) or as one
-  // of the status strings the Pi reports: "Optimal", "Critical",
-  // "Temp warning", "Humidity warning".
+  // of the status strings the Pi reports.
   double? _cropHealthScore() {
     final raw = _sensorData['crop_health'];
     if (raw == null) return null;
@@ -718,30 +906,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (asNum != null) return asNum.clamp(0.0, 100.0);
 
     final status = raw.toString().toLowerCase().trim();
-    if (status.contains('optimal')) {
-      return 95.0;
-    }
-    if (status.contains('critical')) {
-      return 15.0;
-    }
-    if (status.contains('temp') && status.contains('warning')) {
-      return 55.0;
-    }
-    if (status.contains('humidity') && status.contains('warning')) {
-      return 55.0;
-    }
-    if (status.contains('warning')) {
-      // Catch-all for any other "<thing> warning" status the Pi sends.
-      return 55.0;
-    }
+    if (status.contains('optimal')) return 95.0;
+    if (status.contains('critical')) return 15.0;
+    if (status.contains('warning')) return 55.0;
     return null; // Unrecognized status text — skip it.
   }
 
   double _computeOverallHealthScore() {
-    // Weighted average across every factor that currently has data.
-    // Weights of missing factors are dropped and the rest
-    // renormalized, so one offline sensor doesn't silently zero out
-    // the whole score.
     double weightedSum = 0.0;
     double weightTotal = 0.0;
 
@@ -759,8 +930,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
     }
 
-    // Average the three NPK readings into one combined score, then
-    // fold that in as a single weighted factor.
     final npkScores = _npkScoreConfig
         .map(
           (cfg) => _rangeScore(
@@ -785,8 +954,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     final double? cropScore = _cropHealthScore();
 
     if (sensorScore != null && cropScore != null) {
-      // The sensor score already aggregates every live reading, so it
-      // carries more weight than the single crop-health status.
       return (sensorScore * 0.6) + (cropScore * 0.4);
     }
     if (sensorScore != null) return sensorScore;
@@ -794,8 +961,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     return 0.0;
   }
 
-  // Overall health score (same weighted formula as before) shown as a
-  // ring gauge, next to an "Active alerts" card.
+  // Overall health ring + "Active alerts" card. Gray, no border.
   Widget _buildTopInsightCards() {
     final bool hasData = _sensorData.isNotEmpty;
     final double score = hasData
@@ -828,7 +994,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           Expanded(
             child: AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              outlineColor: AppColors.emphasisOutline,
               child: Row(
                 children: [
                   AppHealthRing(
@@ -882,7 +1047,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           Expanded(
             child: AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              outlineColor: AppColors.emphasisOutline,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -912,8 +1076,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // Small rounded tag under the alert count: red for critical sensors,
-  // amber when there are only cautions, green when everything is optimal.
+  // Small rounded tag under the alert count.
   Widget _alertPill(int total, int critical) {
     final String text;
     final Color color;
@@ -931,9 +1094,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     return AppStatusPill(text: text, color: color);
   }
 
-  // Active alerts = sensors currently outside their optimal range, using
-  // the same per-sensor status as the Sensor Overview cards. "critical"
-  // counts the ones in the Critical band.
+  // Active alerts = sensors currently outside their optimal range.
   ({int total, int critical}) _computeAlertSummary() {
     int total = 0;
     int critical = 0;
@@ -953,7 +1114,71 @@ class _DashboardScreenState extends State<DashboardScreen>
     return (total: total, critical: critical);
   }
 
-  // ── SENSOR OVERVIEW GRID (mini charts + range status bars) ──
+  // ───────────────────────── SENSOR OVERVIEW ─────────────────────────
+
+  /// Icon tile + title + subtitle, like the design.
+  Widget _buildSensorOverviewTitle() {
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: AppColors.darkGreen,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(AppIcons.sensors, color: Colors.white, size: 24),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sensor Overview', style: AppText.sectionTitle),
+              SizedBox(height: 2),
+              Text('Your crop sensor readings', style: AppText.subtitle),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Light-green banner: bold "Last reading" line, "x ago" under it.
+  Widget _buildLastReadingBanner(String relative) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.green.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Last reading: ${_formatLastReading()}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          if (relative.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              relative,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildSensorGrid() {
     if (CropService.instance.loaded && CropService.instance.selected == null) {
       return SizedBox(
@@ -1006,7 +1231,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
 
     return GridView.count(
-      padding: EdgeInsets.zero, // removes the hidden top inset (dead space)
+      padding: EdgeInsets.zero,
       crossAxisCount: 3,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
@@ -1038,10 +1263,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     final relative = _formatRelativeReading();
 
-    // The whole page (green header included) lives inside one scroll
-    // view, so the header scrolls away with the content. Standard
-    // pull-to-refresh: drag down from the top, the spinner follows your
-    // finger and drops in just below the status bar.
     return RefreshIndicator(
       color: AppColors.green,
       backgroundColor: Colors.white,
@@ -1049,204 +1270,37 @@ class _DashboardScreenState extends State<DashboardScreen>
       displacement: 40,
       onRefresh: _fetchSensorData,
       child: SingleChildScrollView(
-        // Always scrollable so pull-to-refresh also works when the
-        // content fits on screen.
         physics: const AlwaysScrollableScrollPhysics(
           parent: ClampingScrollPhysics(),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // GREEN HEADER, top part: app title + account icon, greeting.
-            Container(
-              color: AppColors.green,
-              padding: const EdgeInsets.only(
-                top: 60,
-                left: 20,
-                right: 20,
-                bottom: 14,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(AppIcons.plant, color: Colors.white, size: 26),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'HarBest: Dashboard',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppColors.deepGreen,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const UserAccount(),
-                            ),
-                          );
-                        },
-                        behavior: HitTestBehavior.opaque,
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(
-                            AppIcons.account,
-                            color: Colors.white,
-                            size: 30,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  // Small gap so the greeting sits right under the title.
-                  const SizedBox(height: 2),
-                  Text(
-                    '${_greetingForNow()}, ${_userFirstName()}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.darkGreen,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    "Let's grow your crop!",
-                    style: TextStyle(
-                      color: AppColors.darkGreen,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        // Gray page so the white cards stand out.
+        child: ColoredBox(
+          color: AppColors.background,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // PICTURE HEADER + crop card
+              _buildHeader(),
 
-            if (CropService.instance.crops.length > 1 ||
-                CropService.instance.crops.any(
-                  (c) => c.ownerUid != FirebaseAuth.instance.currentUser?.uid,
-                ))
-              Container(
-                width: double.infinity,
-                color: AppColors.green,
-                padding: const EdgeInsets.only(top: 4, bottom: 14),
-                child: Center(
-                  child: GestureDetector(
-                    onTap: _openCropSwitcher,
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 200),
-                            child: Text(
-                              CropService.instance.selected?.name ??
-                                  'Choose crop',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Icon(
-                            AppIcons.expand,
-                            size: 16,
-                            color: AppColors.textPrimary,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+              // PAGE CONTENT (20px side margins)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildTopInsightCards(),
+                    const SizedBox(height: 25),
+                    _buildSensorOverviewTitle(),
+                    const SizedBox(height: 12),
+                    _buildLastReadingBanner(relative),
+                    const SizedBox(height: 14),
+                    _buildSensorGrid(),
+                    const SizedBox(height: 15),
+                  ],
                 ),
               ),
-
-            // GREEN HEADER, lower part: the green band ends at the vertical
-            // middle of the plant picture. Measured from the card's top:
-            // 1.5px border + 14px padding + half of the 160px image.
-            Stack(
-              children: [
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 1.5 + 14 + 80,
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: AppColors.green,
-                      borderRadius: BorderRadius.only(
-                        bottomLeft: Radius.circular(50),
-                        bottomRight: Radius.circular(50),
-                      ),
-                    ),
-                  ),
-                ),
-                _buildCropImageCard(),
-              ],
-            ),
-
-            // PAGE CONTENT (20px side margins)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTopInsightCards(),
-                  const SizedBox(height: 25),
-                  const Text('Sensor Overview', style: AppText.sectionTitle),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Your crop sensor readings',
-                    style: AppText.subtitle,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Last reading: ${_formatLastReading()}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  if (relative.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        relative,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.black45,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  _buildSensorGrid(),
-                  const SizedBox(height: 15),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1254,7 +1308,8 @@ class _DashboardScreenState extends State<DashboardScreen>
 }
 
 // ─────────────────────────────────────────────
-// SENSOR MINI CARD: value, mini chart, range % bar, status label
+// SENSOR MINI CARD: label, value, mini chart, range % bar, status label
+// Gray card, no border, no shadow.
 // ─────────────────────────────────────────────
 class SensorMiniCard extends StatelessWidget {
   final SensorDef def;
@@ -1297,7 +1352,7 @@ class SensorMiniCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(def.icon, size: 15, color: AppColors.green),
+              Icon(def.icon, size: 15, color: AppColors.darkGreen),
             ],
           ),
           const SizedBox(height: 2),
@@ -1306,7 +1361,7 @@ class SensorMiniCard extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Text(
               valueText,
-              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ),
           const SizedBox(height: 4),
@@ -1390,6 +1445,8 @@ class _SparklinePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // White plate behind the chart so it reads clearly on the gray card.
+    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
     canvas.drawRect(
       Offset.zero & size,
       Paint()..color = color.withOpacity(0.06),

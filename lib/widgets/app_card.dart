@@ -9,6 +9,8 @@ class AppCard extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? outlineColor;
   final double radius;
+  final Color? color;
+  final bool flat; // true = no shadow
 
   const AppCard({
     super.key,
@@ -17,6 +19,8 @@ class AppCard extends StatelessWidget {
     this.onTap,
     this.outlineColor,
     this.radius = AppRadius.card,
+    this.color,
+    this.flat = false,
   });
 
   @override
@@ -24,9 +28,9 @@ class AppCard extends StatelessWidget {
     final card = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: color ?? AppColors.card,
         borderRadius: BorderRadius.circular(radius),
-        boxShadow: outlineColor == null ? AppShadows.card : null,
+         boxShadow: (outlineColor == null && !flat) ? AppShadows.card : null,
         border: outlineColor == null
             ? null
             : Border.all(color: outlineColor!, width: 1.5),

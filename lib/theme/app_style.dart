@@ -26,6 +26,8 @@ class AppColors {
   static const Color emphasisOutline = Color(0xFF676B62);
   static const Color divider = Color(0xFFE0E0E0);
   static const Color rowBackground = Color(0xFFF9F9F9); // expanded list rows
+  static const Color cardGray = Color(0xFFF0F0F0);
+
 
   // Text
   static const Color textPrimary = Colors.black87;
@@ -230,6 +232,7 @@ class AppIcons {
   static const IconData refresh = CupertinoIcons.arrow_clockwise;
   static const IconData offline = CupertinoIcons.wifi_slash;
   static const IconData edit = CupertinoIcons.pencil;
+  static const IconData up = CupertinoIcons.chevron_up;
 
   // Snack bar / feedback
   static const IconData success = CupertinoIcons.check_mark_circled_solid;
@@ -246,6 +249,7 @@ class AppIcons {
   static const IconData nitrogen = CupertinoIcons.circle_grid_hex_fill;
   static const IconData phosphorus = CupertinoIcons.largecircle_fill_circle;
   static const IconData potassium = CupertinoIcons.staroflife_fill;
+  static const IconData sensors = CupertinoIcons.square_grid_2x2_fill;
 
   // growth stages + plant profile
   static const IconData growthGermination = CupertinoIcons.circle_grid_3x3_fill;

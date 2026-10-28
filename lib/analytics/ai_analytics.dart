@@ -239,12 +239,19 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   final _chipKeys = List.generate(kSensors.length, (_) => GlobalKey());
   final _mini = ValueNotifier<(double, double)>((0.0, 1.0));
 
+  // Page scroll: drives the "back to top" button.
+  final _pageScroll = ScrollController();
+  bool _showTop = false;
+  // How close (in pixels) to the bottom before the button appears.
+  static const double _showTopWithin = 400;
+
   // Overall period covered by the data (earliest / latest reading).
   DateTime? _covStart, _covEnd;
 
   @override
   void initState() {
     super.initState();
+    _pageScroll.addListener(_onPageScroll);
     CropService.instance.addListener(_onCropChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
   }
@@ -252,6 +259,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   @override
   void dispose() {
     CropService.instance.removeListener(_onCropChanged);
+    _pageScroll.dispose();
     _chipScroll.dispose();
     _mini.dispose();
     super.dispose();
@@ -1036,6 +1044,73 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     );
   }
 
+  // ───────────────────────── BACK TO TOP ─────────────────────────
+
+  // Show the button only when the user is near the bottom of the page.
+  void _onPageScroll() {
+    if (!_pageScroll.hasClients) return;
+    final p = _pageScroll.position;
+    final near =
+        p.maxScrollExtent > 0 && p.pixels >= p.maxScrollExtent - _showTopWithin;
+    if (near != _showTop) setState(() => _showTop = near);
+  }
+
+  void _scrollToTop() {
+    if (!_pageScroll.hasClients) return;
+    _pageScroll.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget _buildBackToTop() {
+    return Positioned(
+      right: AppSpace.page,
+      bottom: AppSpace.page,
+      child: IgnorePointer(
+        ignoring: !_showTop,
+        child: AnimatedSlide(
+          offset: _showTop ? Offset.zero : const Offset(0, 0.6),
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+          child: AnimatedOpacity(
+            opacity: _showTop ? 1 : 0,
+            duration: const Duration(milliseconds: 250),
+            child: GestureDetector(
+              onTap: _scrollToTop,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.green,
+                  shape: BoxShape.circle,
+                  boxShadow: AppShadows.card,
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(AppIcons.up, size: 16, color: AppColors.onGreen),
+                    Text(
+                      'top',
+                      style: TextStyle(
+                        fontSize: 9,
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.onGreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ───────────────────────── PAGE ─────────────────────────
 
   @override
@@ -1044,32 +1119,39 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     return Column(
       children: [
         const AppHeader(title: 'AI Analytics'),
-        // Scrollable body (pull down to refresh)
+        // Scrollable body (pull down to refresh) with the floating
+        // back-to-top button drawn above it.
         Expanded(
-          child: RefreshIndicator(
-            color: AppColors.green,
-            onRefresh: _refreshAll,
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(AppSpace.page),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildCoverageBanner(),
-                  gap,
-                  _buildSensorSelector(),
-                  gap,
-                  _buildWeeklyCard(),
-                  gap,
-                  _buildBreakdownCard(),
-                  gap,
-                  _buildCorrelationCard(),
-                  gap,
-                  _buildDailyCard(), // Daily Rolling Average is the last graph
-                  gap,
-                ],
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                color: AppColors.green,
+                onRefresh: _refreshAll,
+                child: SingleChildScrollView(
+                  controller: _pageScroll,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(AppSpace.page),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildCoverageBanner(),
+                      gap,
+                      _buildSensorSelector(),
+                      gap,
+                      _buildWeeklyCard(),
+                      gap,
+                      _buildBreakdownCard(),
+                      gap,
+                      _buildCorrelationCard(),
+                      gap,
+                      _buildDailyCard(), // Daily Rolling Average is the last graph
+                      gap,
+                    ],
+                  ),
+                ),
               ),
-            ),
+              _buildBackToTop(),
+            ],
           ),
         ),
       ],
