@@ -44,3 +44,7 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 env.json
+.vs/
+build/
+android/build/
+.dart_tool/
