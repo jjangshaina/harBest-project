@@ -14,6 +14,8 @@ import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/services/supabase_claim.dart';
 import 'package:flutter_application_harbest_1/pages/claim_device.dart';
 import 'package:flutter_application_harbest_1/pages/add_crop.dart';
+import 'package:flutter_application_harbest_1/services/device_status.dart';
+import 'package:flutter_application_harbest_1/widgets/device_status_widgets.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -282,6 +284,16 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? _deviceId;
   bool _initialized = false;
 
+  // ── DEVICE CONNECTION STATUS ──
+  // Latest heartbeat row from `device_status` (null until the Pi runs the
+  // updated script; the status then falls back to the last reading time).
+  DeviceStatus? _deviceStatus;
+  RealtimeChannel? _statusChannel;
+  // Feeds the status pill's details sheet so it updates while open.
+  final ValueNotifier<DeviceStatusView> _statusView = ValueNotifier(
+    const DeviceStatusView(),
+  );
+
   // Full name from the same Firestore record the My Account page edits
   // (users/{uid}.fullName). Listening to snapshots means the greeting
   // updates right after the name is changed there.
@@ -302,10 +314,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => _fetchSensorData(),
+      (_) => _refreshAll(),
     );
     _relativeTimeTicker = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {});
+      _syncStatusView(); // Online → Delayed → Offline as time passes
     });
   }
 
@@ -317,6 +331,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final id = svc.selected?.deviceId;
     if (_initialized && id == _deviceId) {
       setState(() {}); // same device, just refresh name/image
+      _syncStatusView();
       return;
     }
     _initialized = true;
@@ -325,16 +340,92 @@ class _DashboardScreenState extends State<DashboardScreen>
       _supabase.removeChannel(_sensorChannel!);
       _sensorChannel = null;
     }
+    if (_statusChannel != null) {
+      _supabase.removeChannel(_statusChannel!);
+      _statusChannel = null;
+    }
     setState(() {
       _sensorData = {};
       _history = [];
       _error = null;
       _isLoading = id != null;
+      _deviceStatus = null;
     });
+    _syncStatusView();
     if (id != null) {
       _fetchSensorData();
       _subscribeToSensor(id);
+      _fetchDeviceStatus();
+      _subscribeToDeviceStatus(id);
     }
+  }
+
+  Future<void> _refreshAll() =>
+      Future.wait([_fetchSensorData(), _fetchDeviceStatus()]);
+
+  // ── DEVICE STATUS ──
+
+  DeviceStatusView _currentStatusView() => DeviceStatusView(
+        deviceId: _deviceId,
+        cropName: CropService.instance.selected?.name,
+        status: _deviceStatus,
+        lastReading: _lastReadingAsLocal(),
+      );
+
+  void _syncStatusView() {
+    if (mounted) _statusView.value = _currentStatusView();
+  }
+
+  Future<void> _fetchDeviceStatus() async {
+    final deviceId = _deviceId;
+    if (deviceId == null) return;
+    try {
+      final row = await _supabase
+          .from('device_status')
+          .select()
+          .eq('device_id', deviceId)
+          .maybeSingle();
+      if (!mounted || deviceId != _deviceId) return;
+      setState(() {
+        _deviceStatus = row == null ? null : DeviceStatus.fromMap(row);
+      });
+      _syncStatusView();
+    } catch (e) {
+      // Table not created yet, or offline: keep the reading-based fallback.
+      debugPrint('device_status fetch error: $e');
+    }
+  }
+
+  void _subscribeToDeviceStatus(String deviceId) {
+    _statusChannel = _supabase
+        .channel('device_status_$deviceId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'device_status',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'device_id',
+            value: deviceId,
+          ),
+          callback: (payload) {
+            if (!mounted || deviceId != _deviceId) return;
+            final row = payload.newRecord;
+            if (row.isEmpty) return;
+            setState(() {
+              _deviceStatus = DeviceStatus.fromMap(
+                Map<String, dynamic>.from(row),
+              );
+            });
+            _syncStatusView();
+          },
+        )
+        .subscribe();
+  }
+
+  void _openDeviceStatus() {
+    _syncStatusView();
+    showDeviceStatusSheet(context, _statusView);
   }
 
   void _openCropSwitcher() {
@@ -403,6 +494,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     _relativeTimeTicker?.cancel();
     _nameSub?.cancel();
     if (_sensorChannel != null) _supabase.removeChannel(_sensorChannel!);
+    if (_statusChannel != null) _supabase.removeChannel(_statusChannel!);
+    _statusView.dispose();
     super.dispose();
   }
 
@@ -439,6 +532,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         _isLoading = false;
         _error = null;
       });
+      _syncStatusView();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -474,6 +568,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               }
               _error = null;
             });
+            _syncStatusView();
           },
         )
         .subscribe();
@@ -1140,6 +1235,11 @@ class _DashboardScreenState extends State<DashboardScreen>
             ],
           ),
         ),
+        if (_deviceId != null)
+          DeviceStatusPill(
+            connection: _currentStatusView().connection,
+            onTap: _openDeviceStatus,
+          ),
       ],
     );
   }
@@ -1208,20 +1308,24 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (_error != null &&
         _sensorData.isEmpty &&
         _error!.startsWith('No sensor data')) {
-      return const SizedBox(
+      final online =
+          _currentStatusView().connection == DeviceConnection.online;
+      return SizedBox(
         height: 200,
         child: Center(
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(AppIcons.plant, size: 52, color: Colors.grey),
-                SizedBox(height: 10),
+                const Icon(AppIcons.plant, size: 52, color: Colors.grey),
+                const SizedBox(height: 10),
                 Text(
-                  'Waiting for the first reading.\nMake sure your device is switched on and connected.',
+                  online
+                      ? 'Your device is online.\nWaiting for the first reading.'
+                      : 'Waiting for the first reading.\nMake sure your device is switched on and connected.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontSize: 16),
+                  style: const TextStyle(color: Colors.grey, fontSize: 16),
                 ),
               ],
             ),
@@ -1268,7 +1372,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       backgroundColor: Colors.white,
       edgeOffset: MediaQuery.of(context).padding.top,
       displacement: 40,
-      onRefresh: _fetchSensorData,
+      onRefresh: _refreshAll,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(
           parent: ClampingScrollPhysics(),
