@@ -1,64 +1,64 @@
-import 'dart:math' as math;
-import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
+// UNTESTED: written without a Flutter compiler. Replaces the mock-data version.
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
+import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
+import 'package:flutter_application_harbest_1/services/forecast_service.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
 
 const _forecastColor = Color(0xFFD9822B);
 
-/// Forecast horizons: label, subtitle text, and hours of history shown
-/// before "Now". The future side is always twice the history side.
-const _ranges = [
-  (label: '24 hours', text: '24 hours', pastHours: 12),
-  (label: '3 days', text: '3 days', pastHours: 36),
-  (label: '7 days', text: '7 days', pastHours: 84),
-];
+/// App sensor key -> variable name used by the forecast pipeline.
+/// Sensors not listed (heat index, N, P, K) have no forecast yet.
+const _varNames = {
+  'moisture': 'moisture_pct',
+  'pH': 'pH',
+  'temperature': 'temperature',
+  'humidity': 'humidity',
+  'EC': 'EC',
+};
 
-/// What the chart needs for one sensor + horizon.
-/// TODO(backend): replace [_mockForecast] with the real forecasting result.
 class _Forecast {
-  final List<FlSpot> actual; // x = hours relative to now (≤ 0)
-  final List<FlSpot> predicted; // x = hours relative to now (≥ 0)
-  final List<FlSpot> upper; // confidence band, same x as [predicted]
-  final List<FlSpot> lower;
+  final List<FlSpot> actual, predicted, upper, lower; // x = hours from now
   const _Forecast(this.actual, this.predicted, this.upper, this.lower);
 }
 
-// Placeholder data shaped like the design: the sensor drifts down out of its
-// optimal range and the confidence band widens with time.
-_Forecast _mockForecast(SensorDef def, int range) {
-  final past = _ranges[range].pastHours.toDouble();
-  final future = past * 2;
-  final span = def.max - def.min;
-  const n = 12;
+/// [k] converts pipeline units to app units (EC: µS/cm -> mS/cm).
+_Forecast _parse(Map<String, dynamic> v, double k) {
+  final origin = DateTime.parse(v['current']['time'] as String);
+  double hrs(String t) => DateTime.parse(t).difference(origin).inMinutes / 60.0;
+  final now = (v['current']['value'] as num).toDouble() * k;
 
   final actual = <FlSpot>[
-    for (int i = 0; i <= n; i++)
-      FlSpot(
-        -past + past * i / n,
-        def.min +
-            span *
-                (0.6 -
-                    0.55 * i / n +
-                    0.03 * math.sin(i * 1.7) * (1 - i / n)),
-      ),
+    for (final p in (v['history'] as List))
+      FlSpot(hrs(p['t'] as String), (p['v'] as num).toDouble() * k),
   ];
-  final now = actual.last.y;
-  final predicted = <FlSpot>[
-    for (int j = 0; j <= n; j++)
-      FlSpot(future * j / n, now - 0.65 * span * j / n),
+  if (actual.isEmpty) actual.add(FlSpot(0, now));
+
+  final fc = v['forecast'] as List;
+  List<FlSpot> line(String key) => [
+    FlSpot(0, now),
+    for (final f in fc)
+      FlSpot((f['horizon_min'] as num).toDouble() / 60.0,
+          (f[key] as num).toDouble() * k),
   ];
-  return _Forecast(
-    actual,
-    predicted,
-    [for (int j = 0; j <= n; j++) FlSpot(predicted[j].x, predicted[j].y + 0.3 * span * j / n)],
-    [for (int j = 0; j <= n; j++) FlSpot(predicted[j].x, predicted[j].y - 0.3 * span * j / n)],
-  );
+  return _Forecast(actual, line('value'), line('upper'), line('lower'));
+}
+
+String _horizonText(num minutes) {
+  if (minutes < 60) return '${minutes.round()} min';
+  if (minutes < 1440) return '${(minutes / 60).round()} h';
+  return '${(minutes / 1440).round()} days';
+}
+
+String _clock(DateTime t) {
+  final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+  return '$h:${t.minute.toString().padLeft(2, '0')} ${t.hour >= 12 ? 'PM' : 'AM'}';
 }
 
 class AiForecasting extends StatefulWidget {
@@ -70,104 +70,123 @@ class AiForecasting extends StatefulWidget {
 
 class _AiForecastingState extends State<AiForecasting> {
   String _sensorKey = kSensors.first.key;
-  int _range = 0;
+  Map<String, dynamic>? _run;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    CropService.instance.addListener(_load);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    CropService.instance.removeListener(_load);
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    if (!mounted || !CropService.instance.loaded) return;
+    final id = CropService.instance.selected?.deviceId;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final run = id == null ? null : await ForecastService.latest(id);
+      if (!mounted) return;
+      setState(() {
+        _run = run;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Forecast load error: $e');
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not load the forecast. Pull down to retry.';
+        _loading = false;
+      });
+    }
+  }
 
   SensorDef get _def => kSensors.firstWhere(
     (d) => d.key == _sensorKey,
     orElse: () => kSensors.first,
   );
 
-  // "-12h", "+36h", "+3.5d" ...
-  String _hoursLabel(double h) {
-    if (h == 0) return 'Now';
+  Map<String, dynamic>? get _variable {
+    final name = _varNames[_sensorKey];
+    final vars = _run?['variables'];
+    if (name == null || vars is! Map || vars[name] is! Map) return null;
+    return Map<String, dynamic>.from(vars[name] as Map);
+  }
+
+  // ───────────────────────── helpers ─────────────────────────
+
+  Color _statusColor(String s) => switch (s) {
+    'optimal' => AppColors.optimal,
+    'caution' => AppColors.caution,
+    'out_of_range' => AppColors.critical,
+    _ => AppColors.textTertiary,
+  };
+
+  String _statusLabel(String s) => switch (s) {
+    'optimal' => 'OPTIMAL',
+    'caution' => 'CAUTION',
+    'out_of_range' => 'OUT OF RANGE',
+    _ => 'NO RANGE SET',
+  };
+
+  Widget _banner(String text, Color color) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.12),
+      borderRadius: BorderRadius.circular(AppRadius.field),
+    ),
+    child: Text(text, style: AppText.body.copyWith(fontSize: 13, height: 1.4)),
+  );
+
+  String _axisLabel(double h) {
+    if (h.abs() < 0.01) return 'Now';
     final a = h.abs();
-    final text = a < 48
-        ? '${a.round()}h'
-        : '${(a / 24).toStringAsFixed(a % 24 == 0 ? 0 : 1)}d';
+    final text = a < 1
+        ? '${(a * 60).round()}m'
+        : a < 48
+        ? '${a.toStringAsFixed(a % 1 == 0 ? 0 : 1)}h'
+        : '${(a / 24).toStringAsFixed(1)}d';
     return '${h < 0 ? '-' : '+'}$text';
   }
 
-  // ───────────────────────── UI pieces ─────────────────────────
+  // ───────────────────────── chart ─────────────────────────
 
-  Widget _rangePicker() => SizedBox(
-    width: double.infinity,
-    child: CupertinoSlidingSegmentedControl<int>(
-      groupValue: _range,
-      thumbColor: Colors.white,
-      backgroundColor: const Color(0xFFE3E3F0),
-      children: {
-        for (int i = 0; i < _ranges.length; i++)
-          i: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Text(
-              _ranges[i].label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: i == _range ? FontWeight.w700 : FontWeight.w500,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-      },
-      onValueChanged: (v) => setState(() => _range = v ?? 0),
-    ),
-  );
+  Widget _chart(Map<String, dynamic> v, SensorDef def, double k) {
+    final f = _parse(v, k);
+    final opt = v['optimal'] as List?;
+    final optLo = opt == null ? null : (opt[0] as num).toDouble() * k;
+    final optHi = opt == null ? null : (opt[1] as num).toDouble() * k;
 
-  Widget _legendItem(Widget swatch, String label) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      swatch,
-      const SizedBox(width: 4),
-      Text(
-        label,
-        style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-      ),
-    ],
-  );
+    var minX = f.actual.first.x;
+    final maxX = f.predicted.last.x;
+    if (minX >= 0) minX = -(maxX / 2);
 
-  Widget _line(Color c, {bool dashed = false}) => SizedBox(
-    width: 16,
-    height: 3,
-    child: dashed
-        ? Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              for (int i = 0; i < 3; i++)
-                Container(width: 4, height: 3, color: c),
-            ],
-          )
-        : ColoredBox(color: c),
-  );
+    final ys = <double>[
+      for (final s in [f.actual, f.predicted, f.upper, f.lower]) ...s.map((p) => p.y),
+      ?optLo,
+      ?optHi,
+    ];
+    var lo = ys.reduce((a, b) => a < b ? a : b);
+    var hi = ys.reduce((a, b) => a > b ? a : b);
+    if (hi - lo < 1e-9) {
+      hi += 1;
+      lo -= 1;
+    }
+    final pad = (hi - lo) * 0.1;
+    final minY = lo - pad, maxY = hi + pad;
+    final yStep = (maxY - minY) / 4;
 
-  Widget _box(Color c) => Container(
-    width: 12,
-    height: 12,
-    decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2)),
-  );
-
-  Widget _legend(SensorDef def) => Wrap(
-    spacing: 14,
-    runSpacing: 6,
-    children: [
-      _legendItem(_line(AppColors.healthy), 'Actual'),
-      _legendItem(_line(_forecastColor, dashed: true), 'Forecast'),
-      _legendItem(_box(_forecastColor.withOpacity(0.25)), 'Confidence range'),
-      _legendItem(
-        _box(AppColors.optimal.withOpacity(0.2)),
-        'Optimal ${def.optimalText}',
-      ),
-    ],
-  );
-
-  // ───────────────────────── Chart ─────────────────────────
-
-  Widget _chart(SensorDef def) {
-    final f = _mockForecast(def, _range);
-    final past = _ranges[_range].pastHours.toDouble();
-    final span = def.max - def.min;
-    final minY = def.min - span, maxY = def.max;
-
-    // Invisible bars carry the confidence band fill.
     LineChartBarData edge(List<FlSpot> s) => LineChartBarData(
       spots: s,
       color: Colors.transparent,
@@ -177,8 +196,8 @@ class _AiForecastingState extends State<AiForecasting> {
 
     return LineChart(
       LineChartData(
-        minX: -past,
-        maxX: past * 2,
+        minX: minX,
+        maxX: maxX,
         minY: minY,
         maxY: maxY,
         clipData: const FlClipData.all(),
@@ -186,18 +205,20 @@ class _AiForecastingState extends State<AiForecasting> {
         lineTouchData: const LineTouchData(enabled: false),
         gridData: FlGridData(
           drawVerticalLine: false,
-          horizontalInterval: span,
+          horizontalInterval: yStep,
           getDrawingHorizontalLine: (_) =>
               const FlLine(color: AppColors.track, strokeWidth: 1),
         ),
         rangeAnnotations: RangeAnnotations(
-          horizontalRangeAnnotations: [
-            HorizontalRangeAnnotation(
-              y1: def.min,
-              y2: def.max,
-              color: AppColors.optimal.withOpacity(0.12),
-            ),
-          ],
+          horizontalRangeAnnotations: optLo == null
+              ? const []
+              : [
+                  HorizontalRangeAnnotation(
+                    y1: optLo,
+                    y2: optHi!,
+                    color: AppColors.optimal.withOpacity(0.12),
+                  ),
+                ],
         ),
         extraLinesData: ExtraLinesData(
           verticalLines: [
@@ -211,20 +232,15 @@ class _AiForecastingState extends State<AiForecasting> {
         ),
         titlesData: FlTitlesData(
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 44,
-              interval: span,
-              getTitlesWidget: (v, _) => Text(
-                '${v.toStringAsFixed(def.decimals)}${def.unit}',
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppColors.textSecondary,
-                ),
+              interval: yStep,
+              getTitlesWidget: (y, _) => Text(
+                y.toStringAsFixed(def.decimals),
+                style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
               ),
             ),
           ),
@@ -232,15 +248,12 @@ class _AiForecastingState extends State<AiForecasting> {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 24,
-              interval: past,
-              getTitlesWidget: (v, _) => Padding(
+              interval: (maxX - minX) / 4,
+              getTitlesWidget: (x, _) => Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  _hoursLabel(v),
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: AppColors.textSecondary,
-                  ),
+                  _axisLabel(x),
+                  style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
                 ),
               ),
             ),
@@ -254,7 +267,6 @@ class _AiForecastingState extends State<AiForecasting> {
           ),
         ],
         lineBarsData: [
-          // 0: actual readings
           LineChartBarData(
             spots: f.actual,
             isCurved: true,
@@ -262,7 +274,6 @@ class _AiForecastingState extends State<AiForecasting> {
             barWidth: 2.5,
             dotData: const FlDotData(show: false),
           ),
-          // 1: forecast (dashed) with a red dot where it starts
           LineChartBarData(
             spots: f.predicted,
             color: _forecastColor,
@@ -270,7 +281,7 @@ class _AiForecastingState extends State<AiForecasting> {
             dashArray: [6, 4],
             dotData: FlDotData(
               show: true,
-              checkToShowDot: (s, _) => s.x == f.predicted.first.x,
+              checkToShowDot: (s, _) => s.x == 0,
               getDotPainter: (a, b, c, d) => FlDotCirclePainter(
                 radius: 4,
                 color: AppColors.critical,
@@ -279,69 +290,176 @@ class _AiForecastingState extends State<AiForecasting> {
               ),
             ),
           ),
-          // 2 + 3: confidence band edges
-          edge(f.upper),
-          edge(f.lower),
+          edge(f.upper), // index 2
+          edge(f.lower), // index 3
         ],
       ),
     );
   }
 
-  // ───────────────────────── Page ─────────────────────────
+  Widget _legendItem(Color c, String label, {bool box = false}) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(width: box ? 12 : 16, height: box ? 12 : 3, color: c),
+      const SizedBox(width: 4),
+      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+    ],
+  );
+
+  // ───────────────────────── cards ─────────────────────────
+
+  Widget _infoCard(String title, String value, {Widget? badge}) => Expanded(
+    child: AppCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: AppText.caption.copyWith(fontSize: 12)),
+          const SizedBox(height: 6),
+          Text(value, style: AppText.cardTitle),
+          if (badge != null) ...[const SizedBox(height: 6), badge],
+        ],
+      ),
+    ),
+  );
+
+  Widget _body() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return Center(child: Text(_error!, style: AppText.subtitle));
+    if (_run == null) {
+      return const Center(
+        child: Text('No forecast has been generated yet.', style: AppText.subtitle),
+      );
+    }
+    final def = _def;
+    final v = _variable;
+    final k = _sensorKey == 'EC' ? 0.001 : 1.0; // µS/cm -> mS/cm
+
+    final children = <Widget>[
+      SensorChipSelector(
+        selectedKey: _sensorKey,
+        onChanged: (key) => setState(() => _sensorKey = key),
+      ),
+      const SizedBox(height: AppSpace.cardGap),
+    ];
+
+    if (_run!['status'] == 'experimental') {
+      children.addAll([
+        _banner('Experimental: ${_run!['note']}', AppColors.info),
+        const SizedBox(height: AppSpace.gap),
+      ]);
+    }
+    if (_run!['stale'] == true) {
+      children.addAll([
+        _banner('Waiting for new sensor data. The forecast is based on older readings.',
+            AppColors.caution),
+        const SizedBox(height: AppSpace.gap),
+      ]);
+    }
+
+    if (v == null) {
+      children.add(
+        SizedBox(
+          width: double.infinity,
+          child: AppCard(
+            padding: const EdgeInsets.all(20),
+            child: Text('A forecast for ${def.label} is not available yet.',
+                style: AppText.subtitle),
+          ),
+        ),
+      );
+      return ListView(padding: const EdgeInsets.all(AppSpace.page), children: children);
+    }
+
+    final status = v['status'] as String;
+    final fc = v['forecast'] as List;
+    final last = fc.last;
+    final leaves = v['leaves_optimal_at'] as String?;
+    final leaveText = leaves != null
+        ? _clock(DateTime.parse(leaves).toLocal())
+        : (status == 'out_of_range' ? 'Now' : 'Stays in range');
+
+    children.addAll([
+      SizedBox(
+        width: double.infinity,
+        child: AppCard(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${def.label} outlook', style: AppText.cardTitle),
+              const SizedBox(height: 2),
+              Text(
+                'Next ${_horizonText((last['horizon_min'] as num))}, predicted from your last readings',
+                style: AppText.subtitle,
+              ),
+              const SizedBox(height: 12),
+              SizedBox(height: 200, child: _chart(v, def, k)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 14, runSpacing: 6, children: [
+                _legendItem(AppColors.healthy, 'Actual'),
+                _legendItem(_forecastColor, 'Forecast'),
+                _legendItem(_forecastColor.withOpacity(0.25), 'Confidence range', box: true),
+                if (v['optimal'] != null)
+                  _legendItem(AppColors.optimal.withOpacity(0.2), 'Optimal', box: true),
+              ]),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: AppSpace.gap),
+      Row(children: [
+        _infoCard(
+          'Predicted in ${_horizonText(last['horizon_min'] as num)}',
+          '${((last['value'] as num).toDouble() * k).toStringAsFixed(def.decimals)}${def.unit}',
+          badge: AppStatusPill(text: _statusLabel(status), color: _statusColor(status)),
+        ),
+        const SizedBox(width: AppSpace.gap),
+        _infoCard('Leaves optimal range', leaveText),
+      ]),
+      const SizedBox(height: AppSpace.gap),
+      SizedBox(
+        width: double.infinity,
+        child: AppCard(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Suggested action', style: AppText.label),
+              const SizedBox(height: 6),
+              Text(v['suggested_action'] as String, style: AppText.body.copyWith(fontSize: 14)),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: AppSpace.gap),
+      Text(v['footer'] as String, style: AppText.caption),
+    ]);
+
+    return RefreshIndicator(
+      color: AppColors.green,
+      onRefresh: _load,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(AppSpace.page),
+        children: children,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final def = _def;
     return Column(
       children: [
         const AppHeader(title: 'AI Forecasting'),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpace.page),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SensorChipSelector(
-                  selectedKey: _sensorKey,
-                  onChanged: (k) => setState(() => _sensorKey = k),
-                ),
-                const SizedBox(height: AppSpace.cardGap),
-                _rangePicker(),
-                const SizedBox(height: AppSpace.cardGap),
-                SizedBox(
-                  width: double.infinity,
-                  child: AppCard(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${def.label} outlook', style: AppText.cardTitle),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Next ${_ranges[_range].text}, predicted from your '
-                          'last readings',
-                          style: AppText.subtitle,
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(height: 200, child: _chart(def)),
-                        const SizedBox(height: 10),
-                        _legend(def),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        Expanded(child: _body()),
       ],
     );
   }
 }
 
 /// Scrolling row of sensor filter chips with a minimap slider underneath.
-/// Tapping a chip centres it; the minimap follows the scroll and can be
-/// tapped or dragged to move through the chips.
+/// (Unchanged from the original file.)
 class SensorChipSelector extends StatefulWidget {
   final String selectedKey;
   final ValueChanged<String> onChanged;
@@ -359,7 +477,6 @@ class SensorChipSelector extends StatefulWidget {
 class _SensorChipSelectorState extends State<SensorChipSelector> {
   final _scroll = ScrollController();
   final _keys = List.generate(kSensors.length, (_) => GlobalKey());
-  // Minimap thumb (start, size) as fractions of the track.
   final _mini = ValueNotifier<(double, double)>((0.0, 1.0));
 
   @override
@@ -369,7 +486,6 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
     super.dispose();
   }
 
-  // Keeps the minimap thumb in sync with the chip row.
   bool _onScroll(Notification n) {
     final m = n is ScrollNotification
         ? n.metrics
@@ -383,11 +499,8 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
         ? 0.0
         : (m.pixels / m.maxScrollExtent).clamp(0.0, 1.0) * (1 - size);
     final next = (start, size);
-    // ScrollMetricsNotification can fire mid-layout, where changing a
-    // listened-to value triggers "Build scheduled during frame".
     final phase = WidgetsBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle ||
-        phase == SchedulerPhase.postFrameCallbacks) {
+    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
       _mini.value = next;
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -413,10 +526,7 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
         Widget bar(double width, Color color) => Container(
           height: 4,
           width: width,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-          ),
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
         );
 
         return GestureDetector(
@@ -431,10 +541,7 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
                 builder: (_, v, _) => Stack(
                   children: [
                     bar(w, Colors.grey.shade300),
-                    Positioned(
-                      left: v.$1 * w,
-                      child: bar(v.$2 * w, Colors.grey.shade600),
-                    ),
+                    Positioned(left: v.$1 * w, child: bar(v.$2 * w, Colors.grey.shade600)),
                   ],
                 ),
               ),
@@ -476,9 +583,7 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
                   showCheckmark: false,
                   selectedColor: AppColors.green,
                   backgroundColor: Colors.white,
-                  side: BorderSide(
-                    color: selected ? AppColors.green : AppColors.track,
-                  ),
+                  side: BorderSide(color: selected ? AppColors.green : AppColors.track),
                   shape: const StadiumBorder(),
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   onSelected: (_) {

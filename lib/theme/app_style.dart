@@ -6,7 +6,7 @@
 // radius directly: use AppColors / AppText / AppIcons / AppRadius / AppSpace.
 // ─────────────────────────────────────────────────────────────────────────
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/cupertino.dart';
 
 // ── COLORS ──
 class AppColors {

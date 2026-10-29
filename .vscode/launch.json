@@ -5,7 +5,9 @@
       "name": "HarBest (with env.json)",
       "request": "launch",
       "type": "dart",
-      "args": ["--dart-define-from-file=env.json"]
+      "cwd": "${workspaceFolder}",
+      "templateFor": "",
+      "toolArgs": ["--dart-define-from-file=env.json"]
     }
   ]
 }
