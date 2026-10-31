@@ -1,8 +1,21 @@
-# flutter_application_harbest_1
+# HarBest
 
 A new Flutter project.
 
-## Getting Started
+## Run locally
+
+Create an `env.json` file in the project root (it is gitignored) containing:
+
+```json
+{
+  "SUPABASE_URL": "https://your-project.supabase.co",
+  "SUPABASE_ANON_KEY": "your-supabase-anon-key"
+}
+```
+
+In VS Code, select **HarBest (with env.json)** in Run and Debug and start the
+app in Chrome. Startup errors are shown in the app, with details in the Debug
+Console.
 
 This project is a starting point for a Flutter application.
 
