@@ -35,7 +35,6 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   bool _isPersonalDetailsExpanded = false;
-  bool _isPasswordSecurityExpanded = false;
   bool _isHelpExpanded = false;
   bool _isTermsExpanded = false;
 
@@ -231,10 +230,18 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  void _openInfo(String title, List<InfoSection> sections) {
+  void _openInfo(
+    String title,
+    List<InfoSection> sections, {
+    bool collapsible = false,
+  }) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => InfoPage(title: title, sections: sections),
+        builder: (_) => InfoPage(
+          title: title,
+          sections: sections,
+          collapsible: collapsible,
+        ),
       ),
     );
   }
@@ -269,8 +276,6 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _handleDeleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) return;
-
-    
 
     final confirmed = await AppDialog.confirm(
       context,
@@ -363,15 +368,14 @@ class _AccountScreenState extends State<AccountScreen> {
                       }),
                       child: _buildPersonalDetailsContent(),
                     ),
-                    AppExpandableTile(
+                    AppMenuTile(
                       icon: AppIcons.security,
-                      title: 'Password & Security',
-                      expanded: _isPasswordSecurityExpanded,
-                      onTap: () => setState(() {
-                        _isPasswordSecurityExpanded =
-                            !_isPasswordSecurityExpanded;
-                      }),
-                      child: _buildPasswordSecurityContent(),
+                      title: 'Password',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ChangePassword(),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -405,7 +409,11 @@ class _AccountScreenState extends State<AccountScreen> {
                     AppMenuTile(
                       icon: AppIcons.aboutUs,
                       title: 'About Us',
-                      onTap: () => _openInfo('About Us', kAboutSections),
+                      onTap: () => _openInfo(
+                        'About Us',
+                        kAboutSections,
+                        collapsible: true,
+                      ),
                     ),
                   ],
                 ),
@@ -523,33 +531,6 @@ class _AccountScreenState extends State<AccountScreen> {
         ),
         const SizedBox(width: 8),
         Expanded(child: value),
-      ],
-    );
-  }
-
-  // Password & Security
-  Widget _buildPasswordSecurityContent() {
-    return Column(
-      children: [
-        _buildOptionRow(
-          icon: AppIcons.lock,
-          label: 'Change Password',
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ChangePassword()),
-            );
-          },
-        ),
-        const SizedBox(height: 14),
-        _buildOptionRow(
-          icon: AppIcons.twoFactor,
-          label: 'Two-Factor Authentication',
-          onTap: () => AppDialog.info(
-            context,
-            title: 'Two-Factor Authentication',
-            message: 'Two-factor authentication is coming soon.',
-          ),
-        ),
       ],
     );
   }

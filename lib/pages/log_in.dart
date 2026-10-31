@@ -14,6 +14,20 @@ import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_text_field.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 
+// Must look like name@domain.tld
+final _emailRegex = RegExp(
+  r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$',
+);
+bool _hasValidEmailFormat(String email) =>
+    !email.contains('..') && _emailRegex.hasMatch(email.trim());
+
+/// True while this page is still checking a sign-in. AuthGate (main.dart)
+/// waits while it is true, so the dashboard is never built for a login that
+/// is about to be rejected.
+final ValueNotifier<bool> loginInProgress = ValueNotifier<bool>(false);
+
+const _badCredentials = 'Incorrect email or password. Please try again.';
+
 class LogIn extends StatefulWidget {
   const LogIn({super.key});
 
@@ -22,262 +36,226 @@ class LogIn extends StatefulWidget {
 }
 
 class _LogInState extends State<LogIn> {
-  bool _obscurePassword = true;
-  bool _isSubmitting = false;
+  // Client-side lockout per email
+  static const _maxAttempts = 3;
+  static const _lockSeconds = 30;
+  static const _prefsKey = 'login_lockout_state_v1';
 
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _attempts = <String, int>{};
+  final _lockedUntil = <String, DateTime>{};
+  bool _hidePassword = true;
+  bool _busy = false;
+  bool _leaving = false; // true once we've navigated to the next screen
+  Timer? _ticker;
 
-  // Failed-login lockout, tracked per email address. Client-side UX layer
-  // only; Firebase's own 'too-many-requests' throttling is the real
-  // backend protection. Persisted via SharedPreferences so a restart
-  // doesn't reset the count.
-  static const int _maxLoginAttempts = 3;
-  static const int _lockoutDurationSeconds = 30;
-  static const String _lockoutPrefsKey = 'login_lockout_state_v1';
-  final Map<String, int> _failedAttemptsByEmail = {};
-  final Map<String, DateTime> _lockedUntilByEmail = {};
-  Timer? _lockoutTicker;
-  SharedPreferences? _prefs;
+  String get _key => _email.text.trim().toLowerCase();
 
-  String get _emailKey => _emailController.text.trim().toLowerCase();
-
-  int get _currentLockoutSecondsRemaining {
-    final until = _lockedUntilByEmail[_emailKey];
-    if (until == null) return 0;
-    final diff = until.difference(DateTime.now()).inSeconds;
-    return diff > 0 ? diff : 0;
-  }
-
-  bool get _isCurrentlyLockedOut => _currentLockoutSecondsRemaining > 0;
-
-  Future<void> _loadLockoutState() async {
-    final prefs = await SharedPreferences.getInstance();
-    _prefs = prefs;
-
-    final raw = prefs.getString(_lockoutPrefsKey);
-    if (raw == null) return;
-
-    try {
-      final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      final now = DateTime.now();
-
-      decoded.forEach((email, value) {
-        final data = value as Map<String, dynamic>;
-        final lockedUntilMillis = data['lockedUntil'] as int?;
-
-        if (lockedUntilMillis != null) {
-          final lockedUntil =
-              DateTime.fromMillisecondsSinceEpoch(lockedUntilMillis);
-          if (lockedUntil.isAfter(now)) {
-            _lockedUntilByEmail[email] = lockedUntil;
-          }
-        } else {
-          final attempts = data['attempts'] as int? ?? 0;
-          if (attempts > 0) _failedAttemptsByEmail[email] = attempts;
-        }
-      });
-    } catch (_) {
-      // Corrupt or unreadable saved state — ignore and start fresh.
-    }
-
-    if (!mounted) return;
-    setState(() {});
-    if (_lockedUntilByEmail.isNotEmpty) _startLockoutTicker();
-  }
-
-  Future<void> _persistLockoutState() async {
-    final prefs = _prefs ?? await SharedPreferences.getInstance();
-    _prefs = prefs;
-
-    final Map<String, dynamic> toSave = {};
-    _failedAttemptsByEmail.forEach((email, count) {
-      toSave[email] = {'attempts': count};
-    });
-    _lockedUntilByEmail.forEach((email, until) {
-      toSave[email] = {'lockedUntil': until.millisecondsSinceEpoch};
-    });
-
-    await prefs.setString(_lockoutPrefsKey, jsonEncode(toSave));
-  }
-
-  void _startLockoutTicker() {
-    _lockoutTicker?.cancel();
-    _lockoutTicker = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      final now = DateTime.now();
-      final expired = _lockedUntilByEmail.entries
-          .where((e) => !e.value.isAfter(now))
-          .map((e) => e.key)
-          .toList();
-
-      if (expired.isNotEmpty) {
-        for (final email in expired) {
-          _lockedUntilByEmail.remove(email);
-        }
-        await _persistLockoutState();
-      }
-
-      if (_lockedUntilByEmail.isEmpty) {
-        timer.cancel();
-      }
-
-      if (mounted) setState(() {});
-    });
+  int get _secondsLeft {
+    final s = _lockedUntil[_key]?.difference(DateTime.now()).inSeconds ?? 0;
+    return s > 0 ? s : 0;
   }
 
   @override
   void initState() {
     super.initState();
-    _loadLockoutState();
+    _loadLockouts();
   }
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    _lockoutTicker?.cancel();
+    _email.dispose();
+    _password.dispose();
+    _ticker?.cancel();
     super.dispose();
   }
 
-  // handling sign in button tap
-  Future<void> _onSignIn() async {
-    if (_emailController.text.trim().isEmpty ||
-        _passwordController.text.isEmpty) {
-      _showSnackBar('Please enter your email and password.');
-      return;
-    }
+  // ── Lockout storage ──
 
-    if (_isCurrentlyLockedOut) {
-      _showSnackBar(
-        'Too many failed attempts. Please try again in '
-        '${_currentLockoutSecondsRemaining}s.',
-      );
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-
+  Future<void> _loadLockouts() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_prefsKey);
+    if (raw == null) return;
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
+      final now = DateTime.now();
+      (jsonDecode(raw) as Map<String, dynamic>).forEach((email, v) {
+        final ms = v['lockedUntil'] as int?;
+        if (ms != null) {
+          final until = DateTime.fromMillisecondsSinceEpoch(ms);
+          if (until.isAfter(now)) _lockedUntil[email] = until;
+        } else if ((v['attempts'] as int? ?? 0) > 0) {
+          _attempts[email] = v['attempts'] as int;
+        }
+      });
+    } catch (_) {} // unreadable saved state: start fresh
+    if (!mounted) return;
+    setState(() {});
+    if (_lockedUntil.isNotEmpty) _startTicker();
+  }
 
-      // Successful sign-in — clear any prior failed attempts for this email.
-      _failedAttemptsByEmail.remove(_emailKey);
-      _lockedUntilByEmail.remove(_emailKey);
-      await _persistLockoutState();
+  Future<void> _saveLockouts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _prefsKey,
+      jsonEncode({
+        for (final e in _attempts.entries) e.key: {'attempts': e.value},
+        for (final e in _lockedUntil.entries)
+          e.key: {'lockedUntil': e.value.millisecondsSinceEpoch},
+      }),
+    );
+  }
 
-      final user = FirebaseAuth.instance.currentUser;
+  // Refreshes the "Try again in Ns" button and drops expired lockouts.
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return t.cancel();
+      final now = DateTime.now();
+      final before = _lockedUntil.length;
+      _lockedUntil.removeWhere((_, until) => !until.isAfter(now));
+      if (_lockedUntil.length != before) _saveLockouts();
+      if (_lockedUntil.isEmpty) t.cancel();
+      setState(() {});
+    });
+  }
 
-      // Unverified users go to the verification screen (stay signed in).
-      if (user != null && !user.emailVerified) {
-        if (!mounted) return;
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const EmailVerification()),
-          (_) => false,
-        );
+  Future<void> _recordFailure(String message) async {
+    final n = (_attempts[_key] ?? 0) + 1;
+    if (n >= _maxAttempts) {
+      _attempts.remove(_key);
+      _lockedUntil[_key] =
+          DateTime.now().add(const Duration(seconds: _lockSeconds));
+      _startTicker();
+      message = 'Too many failed attempts. Please try again in ${_lockSeconds}s.';
+    } else {
+      _attempts[_key] = n;
+      final left = _maxAttempts - n;
+      message = '$message $left attempt${left == 1 ? '' : 's'} remaining.';
+    }
+    await _saveLockouts();
+    _snack(message);
+  }
+
+  // ── Sign in ──
+
+  
+  Future<bool> _emailMatchesRegistered(User user, String typed) async {
+    var registered = user.email ?? '';
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final stored = (doc.data()?['email'] as String?)?.trim();
+      if (stored != null && stored.isNotEmpty) registered = stored;
+    } catch (_) {}
+    return typed == registered;
+  }
+
+  String? _inputError(String email) {
+    if (email.isEmpty || _password.text.isEmpty) {
+      return 'Please enter your email and password.';
+    }
+    if (!_hasValidEmailFormat(email)) {
+      return 'Enter a valid email address with a domain (e.g. name@gmail.com).';
+    }
+    if (_secondsLeft > 0) {
+      return 'Too many failed attempts. Please try again in ${_secondsLeft}s.';
+    }
+    return null;
+  }
+
+  Future<void> _onSignIn() async {
+    final email = _email.text.trim();
+    final error = _inputError(email);
+    if (error != null) {
+      _snack(error);
+      return;
+    }
+
+    setState(() => _busy = true);
+    loginInProgress.value = true; // AuthGate waits until our checks finish
+    try {
+      final user = (await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: _password.text,
+      ))
+          .user!;
+
+      if (!await _emailMatchesRegistered(user, email)) {
+        await FirebaseAuth.instance.signOut();
+        await _recordFailure(_badCredentials);
+        return;
+      }
+
+      _attempts.remove(_key);
+      _lockedUntil.remove(_key);
+      await _saveLockouts();
+      if (!mounted) return;
+
+      if (!user.emailVerified) {
+        _snack('Your email is not verified yet. Please verify it to continue.');
+        _goTo(const EmailVerification());
         return;
       }
 
       // Keep Firestore's isVerified in sync with the real Auth status.
-      if (user != null) {
-        try {
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .set({'isVerified': true}, SetOptions(merge: true));
-        } catch (_) {
-          // Non-critical; the account page retries this sync on load.
-        }
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set({'isVerified': true}, SetOptions(merge: true));
+      } catch (_) {
+        // Non-critical; the account page retries this sync on load.
       }
-
       if (!mounted) return;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const UserDashboard()),
-        (_) => false,
-      );
+      _goTo(const UserDashboard());
     } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-
-      // Only real wrong-credential attempts count toward the lockout.
-      const mismatchCodes = {
-        'wrong-password',
-        'invalid-credential',
-        'user-not-found',
-      };
-      if (mismatchCodes.contains(e.code)) {
-        final attempts = (_failedAttemptsByEmail[_emailKey] ?? 0) + 1;
-
-        if (attempts >= _maxLoginAttempts) {
-          _failedAttemptsByEmail.remove(_emailKey);
-          _lockedUntilByEmail[_emailKey] = DateTime.now().add(
-            const Duration(seconds: _lockoutDurationSeconds),
-          );
-          await _persistLockoutState();
-          _startLockoutTicker();
-          _showSnackBar(
-            'Too many failed attempts. Please try again in '
-            '${_lockoutDurationSeconds}s.',
-          );
-        } else {
-          _failedAttemptsByEmail[_emailKey] = attempts;
-          await _persistLockoutState();
-          final remaining = _maxLoginAttempts - attempts;
-          _showSnackBar(
-            '${_mapFirebaseError(e)} $remaining attempt'
-            '${remaining == 1 ? '' : 's'} remaining.',
-          );
-        }
+      if (e.code == 'user-not-found') {
+        _snack('No account found with this email. Please create an account.');
+      } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        await _recordFailure(_errorText(e));
       } else {
-        _showSnackBar(_mapFirebaseError(e));
+        _snack(_errorText(e));
       }
     } catch (_) {
-      if (!mounted) return;
-      _showSnackBar('An unexpected error occurred. Please try again.');
+      _snack('An unexpected error occurred. Please try again.');
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      // Stay "in progress" only if we're leaving for the next screen.
+      if (!_leaving) loginInProgress.value = false;
+      if (mounted) setState(() => _busy = false);
     }
   }
 
+  String _errorText(FirebaseAuthException e) => switch (e.code) {
+        'wrong-password' => 'Incorrect password. Please try again.',
+        'invalid-credential' => _badCredentials,
+        'user-disabled' => 'This account has been disabled.',
+        'too-many-requests' => 'Too many attempts. Please try again later.',
+        'network-request-failed' => 'Network error. Check your connection.',
+        _ => e.message ?? 'An unexpected error occurred.',
+      };
 
-  String _mapFirebaseError(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'user-not-found':
-        return 'No account found with this email.';
-      case 'wrong-password':
-        return 'Incorrect password. Please try again.';
-      case 'invalid-credential':
-        return 'Incorrect email or password. Please try again.';
-      case 'user-disabled':
-        return 'This account has been disabled.';
-      case 'too-many-requests':
-        return 'Too many attempts. Please try again later.';
-      case 'network-request-failed':
-        return 'Network error. Check your connection.';
-      default:
-        return e.message ?? 'An unexpected error occurred.';
-    }
+  void _goTo(Widget page) {
+    _leaving = true;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => page),
+      (_) => false,
+    );
   }
 
-  void _showSnackBar(String message) {
-    AppSnack.show(context, message, type: AppSnackType.error);
+  void _snack(String message) {
+    if (mounted) AppSnack.show(context, message, type: AppSnackType.error);
   }
+
+  // ── UI ──
 
   @override
   Widget build(BuildContext context) {
-    final locked = _isCurrentlyLockedOut;
+    final left = _secondsLeft;
 
     return AuthScaffold(
-      // Same vertical level and centered heading as the previous design:
-      // title sits about a third of the way down the screen.
       showBrand: false,
       topGap: MediaQuery.of(context).size.height * 0.22,
       centerHeader: true,
@@ -290,31 +268,25 @@ class _LogInState extends State<LogIn> {
             label: 'Email address',
             hint: 'name@example.com',
             icon: AppIcons.mail,
-            controller: _emailController,
+            controller: _email,
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
-            // Lockout is per email, so refresh the button when it changes.
-            onChanged: (_) => setState(() {}),
+            onChanged: (_) => setState(() {}), // lockout is per email
           ),
-
           AuthPasswordField(
             label: 'Password',
             hint: 'Enter your password',
-            controller: _passwordController,
-            isVisible: !_obscurePassword,
-            onToggle: () =>
-                setState(() => _obscurePassword = !_obscurePassword),
+            controller: _password,
+            isVisible: !_hidePassword,
+            onToggle: () => setState(() => _hidePassword = !_hidePassword),
           ),
-
-          // Forgot password link, right-aligned under the password field
           Align(
             alignment: Alignment.centerRight,
             child: GestureDetector(
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      ForgotPassword(initialEmail: _emailController.text),
+                  builder: (_) => ForgotPassword(initialEmail: _email.text),
                 ),
               ),
               behavior: HitTestBehavior.opaque,
@@ -333,20 +305,14 @@ class _LogInState extends State<LogIn> {
               ),
             ),
           ),
-
           const SizedBox(height: 24),
-
           AuthPrimaryButton(
-            label: locked
-                ? 'Try again in ${_currentLockoutSecondsRemaining}s'
-                : 'Sign in',
-            active: !locked,
-            loading: _isSubmitting,
-            onPressed: locked ? null : _onSignIn,
+            label: left > 0 ? 'Try again in ${left}s' : 'Sign in',
+            active: left == 0,
+            loading: _busy,
+            onPressed: left > 0 ? null : _onSignIn,
           ),
-
           const SizedBox(height: 28),
-
           AuthFooterLink(
             prompt: "Don't have an account?",
             linkText: 'Create account',

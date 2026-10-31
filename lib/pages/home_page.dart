@@ -39,7 +39,7 @@ class WelcomeScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
             const Text(
-              'Monitor crop health in real-time with AI-powered analytics and IoT sensors.',
+              'Monitor crop health with AI-powered analytics and IoT sensors.',
               textAlign: TextAlign.center,
               style: AppText.welcomeBody,
             ),
