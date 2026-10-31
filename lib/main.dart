@@ -7,6 +7,7 @@ import 'pages/home_page.dart';
 import 'pages/user_dashboard.dart';
 import 'firebase_options.dart';
 import 'theme/app_style.dart';
+import 'pages/log_in.dart' show loginInProgress;
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
@@ -138,35 +139,44 @@ class _StartupErrorPage extends StatelessWidget {
 // Firebase's own session is gone, or stay "true" if a token is revoked in
 // the background. Checking authStateChanges() directly avoids that class
 // of bug entirely.
+//
+// While the Log In page is still running its own checks (loginInProgress),
+// this waits on the Welcome screen so the Dashboard is never built for a
+// login that is about to be rejected.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<fb_auth.User?>(
-      stream: fb_auth.FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+    return ValueListenableBuilder<bool>(
+      valueListenable: loginInProgress,
+      builder: (context, loggingIn, _) => StreamBuilder<fb_auth.User?>(
+        stream: fb_auth.FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (loggingIn) return const HomePage();
 
-        final user = snapshot.data;
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
 
-        // Defensive: the login flow already blocks unverified users and
-        // signs them straight back out, so a persisted session reaching
-        // here should already be verified. If that ever isn't true, don't
-        // let it through to the Dashboard.
-        if (user != null && !user.emailVerified) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            fb_auth.FirebaseAuth.instance.signOut();
-          });
-          return const HomePage();
-        }
+          final user = snapshot.data;
 
-        return user != null ? const UserDashboard() : const HomePage();
-      },
+          // Defensive: the login flow already blocks unverified users and
+          // signs them straight back out, so a persisted session reaching
+          // here should already be verified. If that ever isn't true, don't
+          // let it through to the Dashboard.
+          if (user != null && !user.emailVerified) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              fb_auth.FirebaseAuth.instance.signOut();
+            });
+            return const HomePage();
+          }
+
+          return user != null ? const UserDashboard() : const HomePage();
+        },
+      ),
     );
   }
 }
