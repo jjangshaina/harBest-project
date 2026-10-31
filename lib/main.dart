@@ -8,29 +8,34 @@ import 'pages/user_dashboard.dart';
 import 'firebase_options.dart';
 import 'theme/app_style.dart';
 
+const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 
-  const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-  const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
-
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Initializing Firebase for auth & app data
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
-    throw StateError('Run with --dart-define-from-file=env.json');
-  }
-
-  // Initializing Supabase for sensor data from Raspberry Pi
-  await Supabase.initialize(
-    url: _supabaseUrl,
-    anonKey: _supabaseAnonKey,
-    accessToken: () async =>
-        await fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
-  );
-
   runApp(const MyApp());
+}
+
+Future<void> _initializeServices() async {
+  try {
+    if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
+      throw StateError('Missing Supabase configuration.');
+    }
+
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      anonKey: _supabaseAnonKey,
+      accessToken: () async =>
+          await fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
+    );
+  } catch (error, stackTrace) {
+    debugPrint('HarBest startup failed: $error\n$stackTrace');
+    rethrow;
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -48,7 +53,80 @@ class MyApp extends StatelessWidget {
       // Every other page (HomePage, GetStarted, LogIn, UserAccount,
       // UserDashboard) is a plain widget relying on this one MaterialApp —
       // none of them should wrap themselves in another MaterialApp.
-      home: const AuthGate(),
+      home: const _AppStartup(),
+    );
+  }
+}
+
+class _AppStartup extends StatefulWidget {
+  const _AppStartup();
+
+  @override
+  State<_AppStartup> createState() => _AppStartupState();
+}
+
+class _AppStartupState extends State<_AppStartup> {
+  late final Future<void> _initialization = _initializeServices();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _initialization,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          final error = snapshot.error;
+          final isMissingConfig =
+              error is StateError &&
+              error.message == 'Missing Supabase configuration.';
+          return _StartupErrorPage(
+            message: isMissingConfig
+                ? 'Add SUPABASE_URL and SUPABASE_ANON_KEY to env.json, then launch using “HarBest (with env.json)”.'
+                : 'HarBest could not initialize. Check the VS Code Debug Console for details.',
+          );
+        }
+
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        return const AuthGate();
+      },
+    );
+  }
+}
+
+class _StartupErrorPage extends StatelessWidget {
+  const _StartupErrorPage({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'HarBest could not start',
+                  style: Theme.of(context).textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(message, textAlign: TextAlign.center),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -6,7 +6,7 @@
 // radius directly: use AppColors / AppText / AppIcons / AppRadius / AppSpace.
 // ─────────────────────────────────────────────────────────────────────────
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/cupertino.dart';
 
 // ── COLORS ──
 class AppColors {
@@ -231,6 +231,10 @@ class AppIcons {
   static const IconData shield = CupertinoIcons.shield;
   static const IconData refresh = CupertinoIcons.arrow_clockwise;
   static const IconData offline = CupertinoIcons.wifi_slash;
+  static const IconData online = CupertinoIcons.wifi;
+  static const IconData device = CupertinoIcons.antenna_radiowaves_left_right;
+  static const IconData camera = CupertinoIcons.camera_fill;
+  static const IconData clock = CupertinoIcons.clock;
   static const IconData edit = CupertinoIcons.pencil;
   static const IconData up = CupertinoIcons.chevron_up;
 
