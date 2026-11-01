@@ -165,7 +165,9 @@ Future<void> showDeviceStatusSheet(
     isScrollControlled: true,
     backgroundColor: AppColors.card,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.dialog)),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(AppRadius.dialog),
+      ),
     ),
     builder: (ctx) => SafeArea(
       child: ConstrainedBox(
@@ -255,7 +257,11 @@ class _DeviceStatusSheet extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Text(conn.explanation, style: AppText.subtitle),
+                      Text(
+                        s?.connectionMessage ??
+                            'The device has not connected yet.',
+                        style: AppText.subtitle,
+                      ),
                     ],
                   ),
                 ),
@@ -297,16 +303,23 @@ class _DeviceStatusSheet extends StatelessWidget {
               ),
             )
           else ...[
-            _sensorRow(AppIcons.temperature, 'Temperature & humidity',
-                s.dht22Ok, live),
-            _sensorRow(AppIcons.nitrogen, 'Soil (NPK, pH, moisture)',
-                s.npkOk, live),
+            _sensorRow(
+              AppIcons.temperature,
+              'Temperature & humidity',
+              s.dht22Ok,
+              live,
+            ),
+            _sensorRow(
+              AppIcons.nitrogen,
+              'Soil (NPK, pH, moisture)',
+              s.npkOk,
+              live,
+            ),
             _sensorRow(AppIcons.camera, 'Camera', s.cameraOk, live),
             _sensorRow(AppIcons.device, 'Data upload (MQTT)', s.mqttOk, live),
           ],
 
-          if (s != null &&
-              (s.uptimeSeconds != null || s.cpuTemp != null)) ...[
+          if (s != null && (s.uptimeSeconds != null || s.cpuTemp != null)) ...[
             const SizedBox(height: 14),
             Text(
               'Raspberry Pi',
@@ -327,8 +340,8 @@ class _DeviceStatusSheet extends StatelessWidget {
                 valueColor: s.cpuTemp! >= 75
                     ? AppColors.critical
                     : s.cpuTemp! >= 65
-                        ? AppColors.caution
-                        : null,
+                    ? AppColors.caution
+                    : null,
               ),
             if (s.ipAddress != null)
               _row(
