@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
-import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 import 'package:flutter_application_harbest_1/pages/user_account.dart';
@@ -16,6 +15,8 @@ import 'package:flutter_application_harbest_1/pages/claim_device.dart';
 import 'package:flutter_application_harbest_1/pages/add_crop.dart';
 import 'package:flutter_application_harbest_1/services/device_status.dart';
 import 'package:flutter_application_harbest_1/widgets/device_status_widgets.dart';
+import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -50,17 +51,23 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   void initState() {
     super.initState();
+    currentTab.value = 0;
     () async {
       await ensureSupabaseClaim();
       await CropService.instance.load();
     }();
   }
 
+  // Also tells the pages which tab is on screen (for the "no internet"
+  // snackbar).
+  void _goTo(int index) {
+    setState(() => _selectedIndex = index);
+    currentTab.value = index;
+  }
+
   // No longer const — DashboardScreen now needs a callback.
   late final List<Widget> _pages = [
-    DashboardScreen(
-      onNavigateToProfile: () => setState(() => _selectedIndex = 2),
-    ),
+    DashboardScreen(onNavigateToProfile: () => _goTo(2)),
     const AiAnalytics(),
     const PlantProfilePage(),
     const AiForecasting(),
@@ -74,7 +81,7 @@ class _MainNavigationState extends State<MainNavigation> {
       body: IndexedStack(index: _selectedIndex, children: _pages),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
+        onTap: _goTo,
       ),
     );
   }
@@ -230,8 +237,35 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, OfflineNotice<DashboardScreen> {
   static const int _historyLength = 10;
+
+  // ── NO INTERNET ──
+  @override
+  int get tabIndex => 0;
+
+  @override
+  bool get hasLastData => _sensorData.isNotEmpty;
+
+  @override
+  void onBackOnline() {
+    _reconnectLiveUpdates();
+    _refreshAll();
+  }
+
+  // Live updates can drop while offline; open them again for this device.
+  Future<void> _reconnectLiveUpdates() async {
+    final id = _deviceId;
+    if (id == null) return;
+    final sensor = _sensorChannel, status = _statusChannel;
+    _sensorChannel = null;
+    _statusChannel = null;
+    if (sensor != null) await _supabase.removeChannel(sensor);
+    if (status != null) await _supabase.removeChannel(status);
+    if (!mounted || id != _deviceId) return;
+    _subscribeToSensor(id);
+    _subscribeToDeviceStatus(id);
+  }
 
   // ── HEADER PICTURE ──
   // Put your picture at this path and list it under `assets:` in pubspec.yaml.
@@ -244,7 +278,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // White text with a soft shadow so it stays readable on any picture.
   static const List<Shadow> _onPhotoShadow = [
-    Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1)),
+    Shadow(color: Color.fromARGB(255, 13, 61, 13), blurRadius: 10, offset: Offset(1, 1)),
   ];
 
   final String _uid = FirebaseAuth.instance.currentUser!.uid;
@@ -277,7 +311,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   Map<String, dynamic> _sensorData = {};
   // Oldest → newest. Feeds the mini charts in the Sensor Overview cards.
   List<Map<String, dynamic>> _history = [];
-  bool _isLoading = true;
   String? _error;
 
   RealtimeChannel? _sensorChannel;
@@ -329,6 +362,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     final svc = CropService.instance;
     if (!svc.loaded) return;
     final id = svc.selected?.deviceId;
+    // Crop list could not load (e.g. offline at start-up): say so now.
+    if (svc.offline) markConnection(false);
     if (_initialized && id == _deviceId) {
       setState(() {}); // same device, just refresh name/image
       _syncStatusView();
@@ -348,7 +383,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       _sensorData = {};
       _history = [];
       _error = null;
-      _isLoading = id != null;
       _deviceStatus = null;
     });
     _syncStatusView();
@@ -360,17 +394,32 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<void> _refreshAll() =>
-      Future.wait([_fetchSensorData(), _fetchDeviceStatus()]);
+  // Pull-to-refresh passes [userAction] so it always answers with a
+  // snackbar when there is no internet. If the crop list itself could not
+  // load (offline at start-up), it is retried first.
+  Future<void> _refreshAll({bool userAction = false}) async {
+    if (CropService.instance.offline) {
+      await CropService.instance.load();
+      if (!mounted) return;
+      if (CropService.instance.offline && _deviceId == null) {
+        markConnection(false, userAction: userAction);
+        return;
+      }
+    }
+    await Future.wait([
+      _fetchSensorData(userAction: userAction),
+      _fetchDeviceStatus(),
+    ]);
+  }
 
   // ── DEVICE STATUS ──
 
   DeviceStatusView _currentStatusView() => DeviceStatusView(
-        deviceId: _deviceId,
-        cropName: CropService.instance.selected?.name,
-        status: _deviceStatus,
-        lastReading: _lastReadingAsLocal(),
-      );
+    deviceId: _deviceId,
+    cropName: CropService.instance.selected?.name,
+    status: _deviceStatus,
+    lastReading: _lastReadingAsLocal(),
+  );
 
   void _syncStatusView() {
     if (mounted) _statusView.value = _currentStatusView();
@@ -384,7 +433,8 @@ class _DashboardScreenState extends State<DashboardScreen>
           .from('device_status')
           .select()
           .eq('device_id', deviceId)
-          .maybeSingle();
+          .maybeSingle()
+          .timeout(kRequestTimeout);
       if (!mounted || deviceId != _deviceId) return;
       setState(() {
         _deviceStatus = row == null ? null : DeviceStatus.fromMap(row);
@@ -499,7 +549,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  Future<void> _fetchSensorData() async {
+  Future<void> _fetchSensorData({bool userAction = false}) async {
     final deviceId = _deviceId;
     if (deviceId == null) return;
     try {
@@ -508,9 +558,13 @@ class _DashboardScreenState extends State<DashboardScreen>
           .select()
           .eq('device_id', deviceId)
           .order('timestamp', ascending: false)
-          .limit(_historyLength);
+          .limit(_historyLength)
+          .timeout(kRequestTimeout);
 
       if (!mounted || deviceId != _deviceId) return; // crop switched meanwhile
+
+      markConnection(true);
+      LastData.save('dashboard_readings_$deviceId', response);
 
       final rows = List<Map<String, dynamic>>.from(
         (response as List).map(
@@ -521,7 +575,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (rows.isEmpty) {
         setState(() {
           _error = "No sensor data found for this crop yet.";
-          _isLoading = false;
         });
         return;
       }
@@ -529,17 +582,46 @@ class _DashboardScreenState extends State<DashboardScreen>
       setState(() {
         _sensorData = rows.first;
         _history = rows.reversed.toList();
-        _isLoading = false;
         _error = null;
       });
       _syncStatusView();
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = "Couldn't load sensor data. Check your connection.";
-        _isLoading = false;
-      });
       debugPrint("Supabase fetch error: $e");
+      if (!mounted || deviceId != _deviceId) return;
+      // No internet and nothing on screen yet (e.g. the app was opened
+      // offline): show the readings saved on the phone.
+      if (_sensorData.isEmpty && isConnectionError(e)) {
+        await _showSavedReadings(deviceId);
+        if (!mounted || deviceId != _deviceId) return;
+      }
+      // The last readings stay on screen; only the message changes.
+      if (_sensorData.isEmpty) {
+        setState(() {
+          _error = "Couldn't load sensor data. Check your connection.";
+        });
+      }
+      if (isConnectionError(e)) {
+        markConnection(false, userAction: userAction);
+      }
+    }
+  }
+
+  Future<void> _showSavedReadings(String deviceId) async {
+    final saved = await LastData.read('dashboard_readings_$deviceId');
+    if (!mounted || deviceId != _deviceId || _sensorData.isNotEmpty) return;
+    if (saved is! List || saved.isEmpty) return;
+    try {
+      final rows = [
+        for (final e in saved) normalizeReading(Map<String, dynamic>.from(e)),
+      ];
+      setState(() {
+        _sensorData = rows.first;
+        _history = rows.reversed.toList();
+        _error = null;
+      });
+      _syncStatusView();
+    } catch (e) {
+      debugPrint('Saved readings unreadable: $e');
     }
   }
 
@@ -706,9 +788,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.55),
-                  Colors.black.withOpacity(0.28),
-                  Colors.black.withOpacity(0.05),
+                  Colors.black.withValues(alpha: 0.55),
+                  Colors.black.withValues(alpha: 0.28),
+                  Colors.black.withValues(alpha: 0.05),
                 ],
                 stops: const [0, 0.55, 1],
               ),
@@ -727,13 +809,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         children: [
           Row(
             children: [
-              const Icon(
-                AppIcons.plant,
-                color: Colors.white,
-                size: 26,
-                shadows: _onPhotoShadow,
-              ),
-              const SizedBox(width: 8),
               const Expanded(
                 child: Text(
                   'HarBest: Dashboard',
@@ -741,7 +816,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 22,
+                    fontSize: 25,
                     fontWeight: FontWeight.bold,
                     shadows: _onPhotoShadow,
                   ),
@@ -760,7 +835,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   child: Icon(
                     AppIcons.account,
                     color: Colors.white,
-                    size: 30,
+                    size: 35,
                     shadows: _onPhotoShadow,
                   ),
                 ),
@@ -867,35 +942,47 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // Gray card, no border, no shadow.
   Widget _buildCropImageCard() {
-    final crop = CropService.instance.selected;
-    final imageUrl = crop?.imageUrl ?? _sensorData['image_url'] as String?;
-    final plantName = crop?.name ?? '';
+  final crop = CropService.instance.selected;
+  final imageUrl = crop?.imageUrl ?? _sensorData['image_url'] as String?;
+  final plantName = crop?.name ?? 'No crop yet';
 
-    return Center(
-      child: GestureDetector(
-        onTap: () {
-          widget.onNavigateToProfile?.call();
-        },
-        child: AppCard(
-          radius: 20,
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              PlantImage(imageUrl: imageUrl, size: 160),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    plantName,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+  return Center(
+    child: GestureDetector(
+      onTap: crop == null ? null : () => widget.onNavigateToProfile?.call(),
+      child: AppCard(
+        radius: 20,
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            crop == null
+                ? Container(
+                    width: 160,
+                    height: 160,
+                    decoration: BoxDecoration(
+                      color: AppColors.track,
+                      borderRadius: BorderRadius.circular(16),
                     ),
+                    child: const Icon(
+                      AppIcons.plant,
+                      size: 56,
+                      color: AppColors.textTertiary,
+                    ),
+                  )
+                : PlantImage(imageUrl: imageUrl, size: 160),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  plantName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
+                ),
+                if (crop != null) ...[
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.all(5),
@@ -910,13 +997,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                 ],
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   // OVERALL HEALTH SCORE
   // Computed from every live sensor reading + crop_health, rather than
@@ -1231,7 +1319,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             children: [
               Text('Sensor Overview', style: AppText.sectionTitle),
               SizedBox(height: 2),
-              Text('Your crop sensor readings', style: AppText.subtitle),
             ],
           ),
         ),
@@ -1250,7 +1337,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.green.withOpacity(0.35),
+        color: AppColors.green.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(AppRadius.field),
       ),
       child: Column(
@@ -1281,35 +1368,20 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildSensorGrid() {
     if (CropService.instance.loaded && CropService.instance.selected == null) {
+      // No crop list because the server couldn't be reached: say so instead
+      // of asking the user to add a device they already have.
       return SizedBox(
-        height: 240,
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(AppIcons.plant, size: 52, color: Colors.grey),
-                const SizedBox(height: 10),
-                const Text(
-                  'Add your device to start monitoring your crop.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontSize: 16),
-                ),
-                const SizedBox(height: 16),
-                AppButton(label: 'Add your device', onPressed: _startSetup),
-              ],
-            ),
-          ),
-        ),
+        height: 280,
+        child: CropService.instance.offline
+            ? const AppOfflineState()
+            : const AppNoCropState(showButton: true),
       );
     }
 
     if (_error != null &&
         _sensorData.isEmpty &&
         _error!.startsWith('No sensor data')) {
-      final online =
-          _currentStatusView().connection == DeviceConnection.online;
+      final online = _currentStatusView().connection == DeviceConnection.online;
       return SizedBox(
         height: 200,
         child: Center(
@@ -1372,7 +1444,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       backgroundColor: Colors.white,
       edgeOffset: MediaQuery.of(context).padding.top,
       displacement: 40,
-      onRefresh: _refreshAll,
+      onRefresh: () => _refreshAll(userAction: true),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(
           parent: ClampingScrollPhysics(),
@@ -1553,7 +1625,7 @@ class _SparklinePainter extends CustomPainter {
     canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
     canvas.drawRect(
       Offset.zero & size,
-      Paint()..color = color.withOpacity(0.06),
+      Paint()..color = color.withValues(alpha: 0.06),
     );
 
     if (values.isEmpty) return;
@@ -1574,7 +1646,7 @@ class _SparklinePainter extends CustomPainter {
     // Optimal band
     canvas.drawRect(
       Rect.fromLTRB(0, yOf(optimalMax), size.width, yOf(optimalMin)),
-      Paint()..color = AppColors.optimal.withOpacity(0.12),
+      Paint()..color = AppColors.optimal.withValues(alpha: 0.12),
     );
 
     if (values.length < 2) {
@@ -1596,7 +1668,7 @@ class _SparklinePainter extends CustomPainter {
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height)
       ..close();
-    canvas.drawPath(fill, Paint()..color = color.withOpacity(0.15));
+    canvas.drawPath(fill, Paint()..color = color.withValues(alpha: 0.15));
 
     canvas.drawPath(
       line,

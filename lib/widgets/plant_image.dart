@@ -102,8 +102,8 @@ class _PlantImageViewerState extends State<_PlantImageViewer> {
     } else if (_doubleTapDetails != null) {
       final pos = _doubleTapDetails!.localPosition;
       _controller.value = Matrix4.identity()
-        ..translate(-pos.dx * 1.5, -pos.dy * 1.5)
-        ..scale(2.5);
+        ..translateByDouble(-pos.dx * 1.5, -pos.dy * 1.5, 0, 1)
+        ..scaleByDouble(2.5, 2.5, 2.5, 1);
     }
   }
 

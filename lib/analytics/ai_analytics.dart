@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,6 +8,8 @@ import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
@@ -220,8 +224,35 @@ class AiAnalytics extends StatefulWidget {
   State<AiAnalytics> createState() => _AiAnalyticsState();
 }
 
-class _AiAnalyticsState extends State<AiAnalytics> {
+class _AiAnalyticsState extends State<AiAnalytics>
+    with OfflineNotice<AiAnalytics> {
   final _supabase = Supabase.instance.client;
+
+  // ── NO INTERNET ──
+  @override
+  int get tabIndex => 1;
+
+  @override
+  bool get hasLastData =>
+      _covEnd != null ||
+      _allCorrelations.isNotEmpty ||
+      _breakdown.isNotEmpty ||
+      _daily.data.isNotEmpty ||
+      _weekly.data.isNotEmpty;
+
+  // Reload everything when the internet comes back or the app reopens.
+  @override
+  void onBackOnline() {
+    _fetchCoverage();
+    _fetchEda(showSpinner: false);
+    _fetchDaily(showSpinner: false);
+    _fetchWeekly(showSpinner: false);
+  }
+
+  // Device whose charts are on screen; a crop-list update for the same
+  // device keeps them instead of reloading everything with spinners.
+  String? _loadedDevice;
+  bool _started = false;
 
   // ── EDA cards state ──
   bool _edaLoading = true;
@@ -248,16 +279,22 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   // Overall period covered by the data (earliest / latest reading).
   DateTime? _covStart, _covEnd;
 
+  // Re-reads the newest reading every 30s; this also keeps "Updated x mins
+  // ago" counting up.
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
     _pageScroll.addListener(_onPageScroll);
     CropService.instance.addListener(_onCropChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchCoverage());
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     CropService.instance.removeListener(_onCropChanged);
     _pageScroll.dispose();
     _chipScroll.dispose();
@@ -268,24 +305,70 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   // Runs when crops finish loading or the user picks another crop.
   void _onCropChanged() {
     if (!mounted || !CropService.instance.loaded) return;
+    final id = _deviceId;
+    if (_started && id == _loadedDevice) {
+      setState(() {}); // same device: keep the charts on screen
+      return;
+    }
+    _started = true;
+    _loadedDevice = id;
+    // Another device: drop the old charts so they are never shown for it.
+    setState(() {
+      _allCorrelations = [];
+      _breakdown = {};
+      _daily.data = [];
+      _weekly.data = [];
+      _covStart = null;
+      _covEnd = null;
+    });
     _fetchEda();
     _fetchCoverage();
     _fetchDaily();
     _fetchWeekly();
   }
 
-  Future<void> _refreshAll() => Future.wait([
-    _fetchEda(showSpinner: false),
-    _fetchCoverage(),
-    _fetchDaily(showSpinner: false),
-    _fetchWeekly(showSpinner: false),
-  ]);
+  // Pull-to-refresh. Also retries the crop list if it could not load.
+  Future<void> _refreshAll() async {
+    if (CropService.instance.offline) {
+      await CropService.instance.load();
+      if (!mounted) return;
+      if (CropService.instance.offline && _deviceId == null) {
+        markConnection(false, userAction: true);
+        return;
+      }
+    }
+    await Future.wait([
+      _fetchEda(showSpinner: false, userAction: true),
+      _fetchCoverage(userAction: true),
+      _fetchDaily(showSpinner: false, userAction: true),
+      _fetchWeekly(showSpinner: false, userAction: true),
+    ]);
+  }
+
+  /// After a failed request: no internet keeps the last data on screen (with
+  /// the notice and snackbar); the error message only replaces a chart that
+  /// has nothing to show. Returns the message to show, or null.
+  String? _failed(
+    Object e,
+    String message, {
+    required bool hasData,
+    required bool userAction,
+  }) {
+    if (isConnectionError(e)) {
+      markConnection(false, userAction: userAction);
+      return hasData ? null : message;
+    }
+    return message;
+  }
 
   String? get _deviceId => CropService.instance.selected?.deviceId;
 
   // ───────────────────────── DATA ─────────────────────────
 
-  Future<void> _fetchEda({bool showSpinner = true}) async {
+  Future<void> _fetchEda({
+    bool showSpinner = true,
+    bool userAction = false,
+  }) async {
     if (showSpinner) {
       setState(() {
         _edaLoading = true;
@@ -294,56 +377,94 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     }
     final id = _deviceId;
     try {
-      final pairs = <_CorrPair>[];
-      final grouped = <String, Map<String, double>>{};
+      var corr = <dynamic>[], breakdown = <dynamic>[];
       if (id != null) {
-        final corr = await _supabase.rpc(
-          'device_correlations',
-          params: {'p_device': id},
-        );
-        final breakdown = await _supabase.rpc(
-          'device_target_breakdown',
-          params: {'p_device': id},
-        );
-
-        // Drop self-pairs and mirrored duplicates; the card filters by sensor.
-        final seen = <String>{};
-        for (final row in List<Map<String, dynamic>>.from(corr as List)) {
-          final a = '${row['col_a']}', b = '${row['col_b']}';
-          final v = _toNum(row['correlation']);
-          if (v == null || a == b || !seen.add(([a, b]..sort()).join('|'))) {
-            continue;
+        corr = await _supabase
+            .rpc('device_correlations', params: {'p_device': id})
+            .timeout(kRequestTimeout) as List;
+        breakdown = await _supabase
+            .rpc('device_target_breakdown', params: {'p_device': id})
+            .timeout(kRequestTimeout) as List;
+        LastData.save('analytics_eda_$id', {
+          'corr': corr,
+          'breakdown': breakdown,
+        });
+      }
+      if (!mounted || id != _deviceId) return;
+      if (id != null) markConnection(true);
+      _applyEda(corr, breakdown);
+    } catch (e) {
+      debugPrint('EDA fetch error: $e');
+      if (!mounted || id != _deviceId) return;
+      // No internet and nothing on screen yet: use the copy saved on the
+      // phone.
+      if (id != null &&
+          _allCorrelations.isEmpty &&
+          _breakdown.isEmpty &&
+          isConnectionError(e)) {
+        final saved = await LastData.read('analytics_eda_$id');
+        if (!mounted || id != _deviceId) return;
+        if (saved is Map) {
+          try {
+            _applyEda(
+              (saved['corr'] as List?) ?? const [],
+              (saved['breakdown'] as List?) ?? const [],
+            );
+          } catch (e) {
+            debugPrint('Saved analysis unreadable: $e');
           }
-          pairs.add(_CorrPair(a, b, v));
-        }
-        pairs.sort((x, y) => y.value.abs().compareTo(x.value.abs()));
-
-        for (final row in List<Map<String, dynamic>>.from(breakdown as List)) {
-          final v = _toNum(row['avg_value']);
-          if (v == null) continue;
-          final byHealth = grouped.putIfAbsent('${row['metric']}', () => {});
-          byHealth['${row['crop_health']}'] = v;
         }
       }
-      if (!mounted) return;
+      final error = _failed(
+        e,
+        'Could not load analysis data.',
+        hasData: _allCorrelations.isNotEmpty || _breakdown.isNotEmpty,
+        userAction: userAction,
+      );
       setState(() {
-        _allCorrelations = pairs;
-        _breakdown = grouped;
-        _edaLoading = false;
-        _edaError = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _edaError = 'Could not load analysis data.';
+        _edaError = error;
         _edaLoading = false;
       });
-      debugPrint('EDA fetch error: $e');
     }
   }
 
+  /// Turns the raw correlation and breakdown rows (from the server or the
+  /// saved copy) into the two charts' data.
+  void _applyEda(List corr, List breakdown) {
+    final pairs = <_CorrPair>[];
+    final grouped = <String, Map<String, double>>{};
+
+    // Drop self-pairs and mirrored duplicates; the card filters by sensor.
+    final seen = <String>{};
+    for (final raw in corr) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final a = '${row['col_a']}', b = '${row['col_b']}';
+      final v = _toNum(row['correlation']);
+      if (v == null || a == b || !seen.add(([a, b]..sort()).join('|'))) {
+        continue;
+      }
+      pairs.add(_CorrPair(a, b, v));
+    }
+    pairs.sort((x, y) => y.value.abs().compareTo(x.value.abs()));
+
+    for (final raw in breakdown) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final v = _toNum(row['avg_value']);
+      if (v == null) continue;
+      final byHealth = grouped.putIfAbsent('${row['metric']}', () => {});
+      byHealth['${row['crop_health']}'] = v;
+    }
+
+    setState(() {
+      _allCorrelations = pairs;
+      _breakdown = grouped;
+      _edaLoading = false;
+      _edaError = null;
+    });
+  }
+
   // Earliest and latest reading for this device (the overall coverage).
-  Future<void> _fetchCoverage() async {
+  Future<void> _fetchCoverage({bool userAction = false}) async {
     final id = _deviceId;
     try {
       Future<DateTime?> edge(bool asc) async {
@@ -352,7 +473,8 @@ class _AiAnalyticsState extends State<AiAnalytics> {
             .select('timestamp')
             .eq('device_id', id!)
             .order('timestamp', ascending: asc)
-            .limit(1);
+            .limit(1)
+            .timeout(kRequestTimeout);
         return r.isEmpty
             ? null
             : DateTime.tryParse('${r.first['timestamp']}')?.toUtc();
@@ -360,13 +482,41 @@ class _AiAnalyticsState extends State<AiAnalytics> {
 
       final start = id == null ? null : await edge(true);
       final end = id == null ? null : await edge(false);
-      if (!mounted) return;
+      if (!mounted || id != _deviceId) return;
+      // A newer reading than the one shown: the charts are out of date.
+      final newer = _covEnd != null && end != null && end.isAfter(_covEnd!);
+      if (id != null) {
+        markConnection(true);
+        LastData.save('analytics_coverage_$id', [
+          start?.toIso8601String(),
+          end?.toIso8601String(),
+        ]);
+      }
       setState(() {
         _covStart = start;
         _covEnd = end;
       });
+      if (newer) {
+        _fetchEda(showSpinner: false);
+        _fetchDaily(showSpinner: false);
+        _fetchWeekly(showSpinner: false);
+      }
     } catch (e) {
       debugPrint('Coverage fetch error: $e');
+      if (!mounted || id != _deviceId || !isConnectionError(e)) return;
+      // Opened offline: the saved dates also drive "Updated ... ago".
+      if (id != null && _covEnd == null) {
+        final saved = await LastData.read('analytics_coverage_$id');
+        if (!mounted || id != _deviceId) return;
+        if (saved is List && saved.length == 2) {
+          setState(() {
+            _covStart = DateTime.tryParse('${saved[0]}')?.toUtc();
+            _covEnd = DateTime.tryParse('${saved[1]}')?.toUtc();
+          });
+        }
+      }
+      // Runs every 30 s, so this is also what notices a lost connection.
+      markConnection(false, userAction: userAction);
     }
   }
 
@@ -380,6 +530,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     T? Function(Map<String, dynamic>) parse,
     String errMsg,
     bool showSpinner,
+    bool userAction,
   ) async {
     final key = _statKey;
     if (showSpinner) {
@@ -389,6 +540,13 @@ class _AiAnalyticsState extends State<AiAnalytics> {
       });
     }
     final id = _deviceId;
+    final savedKey = 'analytics_${rpc}_${id}_$key';
+    List<T> toRows(List raw) => raw
+        .map((e) => parse(Map<String, dynamic>.from(e as Map)))
+        .nonNulls
+        .toList()
+        .reversed
+        .toList();
     try {
       var rows = <T>[];
       if (id != null) {
@@ -396,31 +554,52 @@ class _AiAnalyticsState extends State<AiAnalytics> {
             .rpc(rpc, params: {'p_device': id})
             .ilike('sensor', key)
             .order(orderCol, ascending: false)
-            .limit(keep);
-        rows = (res as List)
-            .map((e) => parse(Map<String, dynamic>.from(e as Map)))
-            .nonNulls
-            .toList()
-            .reversed
-            .toList();
+            .limit(keep)
+            .timeout(kRequestTimeout);
+        rows = toRows(res as List);
+        LastData.save(savedKey, res);
       }
-      if (!mounted || key != _statKey) return; // sensor changed meanwhile
+      // Sensor or crop changed meanwhile.
+      if (!mounted || key != _statKey || id != _deviceId) return;
+      if (id != null) markConnection(true);
       setState(() {
         s.data = rows;
         s.loading = false;
         s.error = null;
       });
     } catch (e) {
-      if (!mounted) return;
+      debugPrint('$rpc fetch error: $e');
+      if (!mounted || key != _statKey || id != _deviceId) return;
+      // No internet and nothing on screen yet: use the copy saved on the
+      // phone for this sensor.
+      if (id != null && s.data.isEmpty && isConnectionError(e)) {
+        final saved = await LastData.read(savedKey);
+        if (!mounted || key != _statKey || id != _deviceId) return;
+        if (saved is List) {
+          try {
+            s.data = toRows(saved);
+          } catch (e) {
+            debugPrint('Saved $rpc data unreadable: $e');
+          }
+        }
+      }
+      final error = _failed(
+        e,
+        errMsg,
+        hasData: s.data.isNotEmpty,
+        userAction: userAction,
+      );
       setState(() {
-        s.error = errMsg;
+        s.error = error;
         s.loading = false;
       });
-      debugPrint('$rpc fetch error: $e');
     }
   }
 
-  Future<void> _fetchDaily({bool showSpinner = true}) => _fetchSeries(
+  Future<void> _fetchDaily({
+    bool showSpinner = true,
+    bool userAction = false,
+  }) => _fetchSeries(
     _daily,
     'device_daily_rolling',
     'day',
@@ -432,9 +611,13 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     ),
     'Could not load daily rolling data.',
     showSpinner,
+    userAction,
   );
 
-  Future<void> _fetchWeekly({bool showSpinner = true}) => _fetchSeries(
+  Future<void> _fetchWeekly({
+    bool showSpinner = true,
+    bool userAction = false,
+  }) => _fetchSeries(
     _weekly,
     'device_weekly_avg',
     'week_end',
@@ -451,13 +634,18 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     },
     'Could not load weekly average data.',
     showSpinner,
+    userAction,
   );
 
   // Changing the sensor re-drives every card: daily + weekly refetch, while
   // correlations and the health breakdown are filtered from loaded data.
   void _selectSensor(String key) {
     if (key == _statKey) return;
-    setState(() => _statKey = key);
+    setState(() {
+      _statKey = key;
+      _daily.data = [];
+      _weekly.data = [];
+    });
     _fetchDaily();
     _fetchWeekly();
   }
@@ -497,6 +685,37 @@ class _AiAnalyticsState extends State<AiAnalytics> {
       optimalText: '${lo.toStringAsFixed(0)} – ${hi.toStringAsFixed(0)} µS/cm',
       decimals: 0,
     );
+  }
+
+  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
+  // clock fields are already local time, so they are rebuilt as a local
+  // DateTime before comparing with now (same as the Plant Profile page).
+  String _updatedText() {
+    final raw = _covEnd?.toIso8601String();
+    if (raw == null) return '';
+    final utc = DateTime.tryParse(raw.toString())?.toUtc();
+    if (utc == null) return '';
+    final dt = DateTime(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
+    final diff = DateTime.now().difference(dt);
+
+    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'Updated $m min${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
+    }
+    final d = diff.inDays;
+    return 'Updated $d day${d == 1 ? '' : 's'} ago';
   }
 
   // ───────────────────────── SHARED UI ─────────────────────────
@@ -780,7 +999,12 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   }
 
   Widget _buildWeeklyChart(SensorDef def) {
-    if (_notReady(_weekly.loading, _weekly.error, _fetchWeekly) case final w?) {
+    if (_notReady(
+      _weekly.loading,
+      _weekly.error,
+      () => _fetchWeekly(userAction: true),
+    )
+        case final w?) {
       return w;
     }
     final pts = _weekly.data;
@@ -821,7 +1045,14 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   );
 
   Widget _buildBreakdownChart() {
-    if (_notReady(_edaLoading, _edaError, _fetchEda) case final w?) return w;
+    if (_notReady(
+      _edaLoading,
+      _edaError,
+      () => _fetchEda(userAction: true),
+    )
+        case final w?) {
+      return w;
+    }
     final data = _sensorBreakdown;
     if (data == null || data.isEmpty) {
       return _emptyBody(
@@ -876,7 +1107,14 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   );
 
   Widget _buildCorrelationChart() {
-    if (_notReady(_edaLoading, _edaError, _fetchEda) case final w?) return w;
+    if (_notReady(
+      _edaLoading,
+      _edaError,
+      () => _fetchEda(userAction: true),
+    )
+        case final w?) {
+      return w;
+    }
     final corr = _sensorCorrelations;
     if (corr.isEmpty) {
       return _emptyBody(
@@ -935,7 +1173,12 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   }
 
   Widget _buildDailyChart(SensorDef def) {
-    if (_notReady(_daily.loading, _daily.error, _fetchDaily) case final w?) {
+    if (_notReady(
+      _daily.loading,
+      _daily.error,
+      () => _fetchDaily(userAction: true),
+    )
+        case final w?) {
       return w;
     }
     final pts = _daily.data;
@@ -1116,9 +1359,13 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   @override
   Widget build(BuildContext context) {
     const gap = SizedBox(height: AppSpace.cardGap);
+    final updated = _updatedText();
     return Column(
       children: [
-        const AppHeader(title: 'AI Analytics'),
+        AppHeader(
+          title: 'AI Analytics',
+          subtitle: updated.isEmpty ? null : updated,
+        ),
         // Scrollable body (pull down to refresh) with the floating
         // back-to-top button drawn above it.
         Expanded(

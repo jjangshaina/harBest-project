@@ -266,7 +266,7 @@ class _LogInState extends State<LogIn> {
         children: [
           AuthField(
             label: 'Email address',
-            hint: 'name@example.com',
+            hint: 'name@gmail.com',
             icon: AppIcons.mail,
             controller: _email,
             keyboardType: TextInputType.emailAddress,
@@ -315,7 +315,7 @@ class _LogInState extends State<LogIn> {
           const SizedBox(height: 28),
           AuthFooterLink(
             prompt: "Don't have an account?",
-            linkText: 'Create account',
+            linkText: 'Sign in',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const GetStarted()),

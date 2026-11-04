@@ -267,6 +267,7 @@ class AppIcons {
   static const IconData alertsOff = CupertinoIcons.bell_slash_fill;
   static const IconData add = CupertinoIcons.add;
   static const IconData done = CupertinoIcons.checkmark;
+  static const IconData cam = CupertinoIcons.camera;
 
   // forms
   static const IconData visible = CupertinoIcons.eye;

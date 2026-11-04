@@ -41,7 +41,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _isVerified = false; // email verified in Firebase Auth
 
   // Holds the user's current full name and email for display
-  String _fullName = '';
+  String _name = '';
   String _email = '';
   bool _isLoadingUser = true;
   bool _hasPromptedForName = false;
@@ -94,7 +94,7 @@ class _AccountScreenState extends State<AccountScreen> {
       }
 
       setState(() {
-        _fullName = (data?['fullName'] as String?) ?? '';
+        _name = (data?['name'] as String?) ?? '';
         // Firestore mirrors the email saved at signup, but Auth's email
         // is the source of truth in case it was ever changed
         _email = user.email ?? (data?['email'] as String?) ?? '';
@@ -120,7 +120,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
       // Older accounts created before the fullName field existed won't
       // have it set. Gently prompt them to add it, once per screen visit.
-      if (_fullName.isEmpty && !_hasPromptedForName) {
+      if (_name.isEmpty && !_hasPromptedForName) {
         _hasPromptedForName = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _promptForMissingName();
@@ -157,12 +157,12 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _handleEditFullName() async {
     final newName = await AppDialog.textInput(
       context,
-      title: 'Edit Full Name',
-      initialValue: _fullName,
-      hint: 'Enter your full name',
+      title: 'Edit Name',
+      initialValue: _name,
+      hint: 'Enter your name',
     );
 
-    if (newName == null || newName == _fullName) return;
+    if (newName == null || newName == _name) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -171,16 +171,16 @@ class _AccountScreenState extends State<AccountScreen> {
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .set({'fullName': newName}, SetOptions(merge: true));
+          .set({'name': newName}, SetOptions(merge: true));
 
       if (!mounted) return;
       setState(() {
-        _fullName = newName;
+        _name = newName;
       });
 
       AppSnack.show(
         context,
-        'Full name updated successfully',
+        'Name updated successfully',
         type: AppSnackType.success,
       );
     } catch (e) {
@@ -458,7 +458,7 @@ class _AccountScreenState extends State<AccountScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _fullName.isNotEmpty ? _fullName : (_isLoadingUser ? '' : 'Your Name'),
+              _name.isNotEmpty ? _name : (_isLoadingUser ? '' : 'Your Name'),
               style: AppText.cardTitle,
             ),
             const SizedBox(height: 2),
@@ -485,9 +485,9 @@ class _AccountScreenState extends State<AccountScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildDetailRow(
-          'Full Name:',
+          'Name:',
           Text(
-            _fullName.isNotEmpty ? _fullName : 'Not set',
+            _name.isNotEmpty ? _name : 'Not set',
             style: AppText.body.copyWith(fontSize: 13),
           ),
         ),

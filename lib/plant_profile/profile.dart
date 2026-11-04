@@ -67,13 +67,13 @@ const List<GrowthStage> kGrowthStages = [
 
 /// Three-band range used to classify a raw sensor value against what's
 /// ideal for mustard greens.
-class _RangeSpec {
+class RangeSpec {
   final double optimalMin;
   final double optimalMax;
   final double acceptableMin;
   final double acceptableMax;
 
-  const _RangeSpec({
+  const RangeSpec({
     required this.optimalMin,
     required this.optimalMax,
     required this.acceptableMin,
@@ -94,19 +94,6 @@ extension on _FactorStatus {
         return AppColors.critical;
       case _FactorStatus.unknown:
         return AppColors.textTertiary;
-    }
-  }
-
-  String get label {
-    switch (this) {
-      case _FactorStatus.optimal:
-        return 'Optimal';
-      case _FactorStatus.caution:
-        return 'Caution';
-      case _FactorStatus.critical:
-        return 'Critical';
-      case _FactorStatus.unknown:
-        return 'No data';
     }
   }
 }
@@ -135,12 +122,12 @@ class _ConditionFactor {
 ///
 /// [ec] is in mS/cm (the same unit the dashboard shows).
 class StageConditions {
-  final _RangeSpec pH;
-  final _RangeSpec soilMoisture;
-  final _RangeSpec temperature;
-  final _RangeSpec humidity;
-  final _RangeSpec heatIndex;
-  final _RangeSpec ec;
+  final RangeSpec pH;
+  final RangeSpec soilMoisture;
+  final RangeSpec temperature;
+  final RangeSpec humidity;
+  final RangeSpec heatIndex;
+  final RangeSpec ec;
   final String npkGuidance;
 
   const StageConditions({
@@ -156,37 +143,37 @@ class StageConditions {
 
 final Map<String, StageConditions> kStageConditions = {
   'Germination': const StageConditions(
-    pH: _RangeSpec(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 65,
       optimalMax: 80,
       acceptableMin: 55,
       acceptableMax: 85,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 20,
       optimalMax: 25,
       acceptableMin: 15,
       acceptableMax: 27,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 60,
       optimalMax: 80,
       acceptableMin: 50,
       acceptableMax: 90,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 20,
       optimalMax: 25,
       acceptableMin: 15,
       acceptableMax: 27,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 0.8,
       optimalMax: 1.5,
       acceptableMin: 0.5,
@@ -196,37 +183,37 @@ final Map<String, StageConditions> kStageConditions = {
         'Minimal feeding needed — the seed itself supplies early nutrients.',
   ),
   'Seedling': const StageConditions(
-    pH: _RangeSpec(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 55,
       optimalMax: 70,
       acceptableMin: 45,
       acceptableMax: 75,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 18,
       optimalMax: 22,
       acceptableMin: 12,
       acceptableMax: 26,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 55,
       optimalMax: 75,
       acceptableMin: 45,
       acceptableMax: 85,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 18,
       optimalMax: 22,
       acceptableMin: 12,
       acceptableMax: 26,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.0,
       optimalMax: 1.8,
       acceptableMin: 0.7,
@@ -235,37 +222,37 @@ final Map<String, StageConditions> kStageConditions = {
     npkGuidance: 'Begin light nitrogen feeding to support early leaf growth.',
   ),
   'Vegetative': const StageConditions(
-    pH: _RangeSpec(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 40,
       optimalMax: 60,
       acceptableMin: 30,
       acceptableMax: 70,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 25,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 50,
       optimalMax: 70,
       acceptableMin: 40,
       acceptableMax: 80,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 27,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.2,
       optimalMax: 2.4,
       acceptableMin: 0.8,
@@ -275,37 +262,37 @@ final Map<String, StageConditions> kStageConditions = {
         'Highest nitrogen demand of the whole cycle — this drives leaf growth.',
   ),
   'Harvesting': const StageConditions(
-    pH: _RangeSpec(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 40,
       optimalMax: 60,
       acceptableMin: 30,
       acceptableMax: 70,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 25,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 50,
       optimalMax: 70,
       acceptableMin: 40,
       acceptableMax: 80,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 27,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.2,
       optimalMax: 2.4,
       acceptableMin: 0.8,
@@ -315,37 +302,37 @@ final Map<String, StageConditions> kStageConditions = {
         'Maintain balanced NPK; ease off heavy nitrogen as leaves mature.',
   ),
   'Bolting': const StageConditions(
-    pH: _RangeSpec(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 35,
       optimalMax: 55,
       acceptableMin: 25,
       acceptableMax: 65,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 12,
       optimalMax: 18,
       acceptableMin: 8,
       acceptableMax: 22,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 45,
       optimalMax: 65,
       acceptableMin: 35,
       acceptableMax: 75,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 12,
       optimalMax: 18,
       acceptableMin: 8,
       acceptableMax: 25,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.0,
       optimalMax: 2.0,
       acceptableMin: 0.7,
@@ -371,9 +358,20 @@ class PlantProfilePage extends StatefulWidget {
   State<PlantProfilePage> createState() => _PlantProfilePageState();
 }
 
-class _PlantProfilePageState extends State<PlantProfilePage> {
+class _PlantProfilePageState extends State<PlantProfilePage>
+    with OfflineNotice<PlantProfilePage> {
   static const String _hiddenPrefsKey = 'insights_hidden_v1';
   static const Duration _snoozeFor = Duration(hours: 6);
+
+  // ── NO INTERNET ──
+  @override
+  int get tabIndex => 2;
+
+  @override
+  bool get hasLastData => _recentReadings.isNotEmpty;
+
+  @override
+  void onBackOnline() => _fetchAll();
 
   final _supabase = Supabase.instance.client;
 
@@ -386,6 +384,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   bool _isLoading = true;
   bool _isSavingDate = false;
   Timer? _timer;
+
+  // Device whose readings are on screen. A crop-list update for the same
+  // device (e.g. a new planting date) refreshes quietly instead of clearing
+  // the page.
+  String? _loadedDevice;
 
   /// Stage whose optimal conditions are shown under the tracker while its
   /// step is held down. [_peekVisible] turns off on release; the index is
@@ -434,6 +437,20 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
 
   void _onCropChanged() {
     if (!mounted || !CropService.instance.loaded) return;
+    final crop = CropService.instance.selected;
+    if (crop != null && crop.deviceId == _loadedDevice) {
+      // Same crop: keep the last data on screen and refresh quietly.
+      setState(() {
+        _plantInfo = {
+          'device_id': crop.deviceId,
+          'plant_name': crop.name,
+          'planting_date': crop.plantingDate?.toIso8601String(),
+        };
+      });
+      _fetchAll();
+      return;
+    }
+    _loadedDevice = crop?.deviceId;
     setState(() {
       _isLoading = true;
       _recentReadings = [];
@@ -445,6 +462,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   }
 
   Future<void> _fetchAll({bool silent = true}) async {
+    // A manual refresh also retries the crop list if it could not load.
+    if (!silent && CropService.instance.offline) {
+      await CropService.instance.load();
+      if (!mounted) return;
+    }
     final crop = CropService.instance.selected;
     if (crop == null) {
       if (!mounted) return;
@@ -455,6 +477,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         _readingsError = null;
         _isLoading = false;
       });
+      if (CropService.instance.offline) {
+        markConnection(false, userAction: !silent);
+      }
       return;
     }
     try {
@@ -463,49 +488,53 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           .select()
           .eq('device_id', crop.deviceId)
           .order('timestamp', ascending: false)
-          .limit(_recentReadingsWindow);
+          .limit(_recentReadingsWindow)
+          .timeout(kRequestTimeout);
 
       // Ignore the result if the user switched crop while this was loading.
       if (!mounted || CropService.instance.selected?.deviceId != crop.deviceId) {
         return;
       }
 
-      // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
-      final rows = (readingsResponse as List)
-          .map((row) => normalizeReading(Map<String, dynamic>.from(row as Map)))
-          .toList();
-      final recs = rows.isEmpty
-          ? <Recommendation>[]
-          : buildRecommendations(rows.first, rows.reversed.toList());
-
-      // Forget hidden items whose sensor is back in range, so a new problem
-      // later is not silently hidden.
-      final before = _hidden.length;
-      _hidden.removeWhere((k, _) => !recs.any((r) => r.key == k));
-
-      setState(() {
-        _plantInfo = {
-          'device_id': crop.deviceId,
-          'plant_name': crop.name,
-          'planting_date': crop.plantingDate?.toIso8601String(),
-        };
-        _recentReadings = rows;
-        _recs = recs;
-        _readingsError =
-            rows.isEmpty ? 'No sensor data found for this crop yet.' : null;
-        _isLoading = false;
-      });
-      if (_hidden.length != before) _saveHidden();
+      markConnection(true);
+      LastData.save('profile_readings_${crop.deviceId}', readingsResponse);
+      _applyReadings(crop, readingsResponse as List);
     } catch (e) {
       debugPrint("PlantProfilePage fetch error: $e");
       if (!mounted) return;
+      // No internet and nothing on screen yet (e.g. the app was opened
+      // offline): show the readings saved on the phone.
+      if (_recentReadings.isEmpty && isConnectionError(e)) {
+        final saved =
+            await LastData.read('profile_readings_${crop.deviceId}');
+        if (!mounted) return;
+        if (saved is List &&
+            saved.isNotEmpty &&
+            _recentReadings.isEmpty &&
+            CropService.instance.selected?.deviceId == crop.deviceId) {
+          try {
+            _applyReadings(crop, saved);
+          } catch (e) {
+            debugPrint('Saved readings unreadable: $e');
+          }
+        }
+      }
       setState(() {
         if (_recentReadings.isEmpty) {
           _readingsError = 'Could not load sensor data. Check your connection.';
+          // Keep the crop's own details (photo, planting date) on screen.
+          _plantInfo = {
+            'device_id': crop.deviceId,
+            'plant_name': crop.name,
+            'planting_date': crop.plantingDate?.toIso8601String(),
+          };
         }
         _isLoading = false;
       });
-      if (!silent && _recentReadings.isNotEmpty) {
+      if (isConnectionError(e)) {
+        // Last data stays; the banner and snackbar explain why.
+        markConnection(false, userAction: !silent);
+      } else if (!silent && _recentReadings.isNotEmpty) {
         AppSnack.show(
           context,
           'Could not refresh. Showing the last data.',
@@ -513,6 +542,37 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         );
       }
     }
+  }
+
+  /// Shows [raw] sensor_readings rows (newest first) for [crop]: from the
+  /// server, or the copy saved on the phone when offline.
+  void _applyReadings(Crop crop, List raw) {
+    // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
+    final rows = raw
+        .map((row) => normalizeReading(Map<String, dynamic>.from(row as Map)))
+        .toList();
+    final recs = rows.isEmpty
+        ? <Recommendation>[]
+        : buildRecommendations(rows.first, rows.reversed.toList());
+
+    // Forget hidden items whose sensor is back in range, so a new problem
+    // later is not silently hidden.
+    final before = _hidden.length;
+    _hidden.removeWhere((k, _) => !recs.any((r) => r.key == k));
+
+    setState(() {
+      _plantInfo = {
+        'device_id': crop.deviceId,
+        'plant_name': crop.name,
+        'planting_date': crop.plantingDate?.toIso8601String(),
+      };
+      _recentReadings = rows;
+      _recs = recs;
+      _readingsError =
+          rows.isEmpty ? 'No sensor data found for this crop yet.' : null;
+      _isLoading = false;
+    });
+    if (_hidden.length != before) _saveHidden();
   }
 
   // --- Back to top ------------------------------------------------------------
@@ -694,7 +754,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           .from('crops')
           .update({'planting_date': _fmtDate(picked)})
           .eq('crop_id', crop.id)
-          .select();
+          .select()
+          .timeout(kRequestTimeout);
       if ((updated as List).isEmpty) {
         throw Exception('No rows updated');
       }
@@ -714,7 +775,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       if (!mounted) return;
       AppSnack.show(
         context,
-        'Could not update the planting date. Please try again.',
+        isConnectionError(e)
+            ? 'No internet connection. The planting date was not saved.'
+            : 'Could not update the planting date. Please try again.',
         type: AppSnackType.error,
       );
     } finally {
@@ -763,7 +826,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   Map<String, dynamic>? get _latestReading =>
       _recentReadings.isNotEmpty ? _recentReadings.first : null;
 
-  _FactorStatus _statusForValue(_RangeSpec range, double value) {
+  _FactorStatus _statusForValue(RangeSpec range, double value) {
     if (value >= range.optimalMin && value <= range.optimalMax) {
       return _FactorStatus.optimal;
     }
@@ -1181,7 +1244,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                     maxLines: 1,
                     style: TextStyle(
                       fontSize: 10.5,
-                      color: textColor.withOpacity(0.7),
+                      color: textColor.withValues(alpha: 0.7),
                     ),
                   ),
                 ),
@@ -1444,7 +1507,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: AppColors.green.withOpacity(0.35),
+                    color: AppColors.green.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -1683,7 +1746,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
             selected: selected,
             showCheckmark: false,
             selectedColor: AppColors.green,
-            backgroundColor: AppColors.green.withOpacity(0.25),
+            backgroundColor: AppColors.green.withValues(alpha: 0.25),
             side: BorderSide.none,
             shape: const StadiumBorder(),
             onSelected: (_) => setState(() => _filter = option),
@@ -1698,7 +1761,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.green.withOpacity(0.12),
+        color: AppColors.green.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppRadius.button),
       ),
       child: Text(
@@ -1867,10 +1930,12 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : showEmpty
-                      ? const AppEmptyState(
-                          icon: AppIcons.plant,
-                          title: 'No crop yet',
-                          message: 'No crop is linked to your account yet.',
+                      // Pullable too, so a failed start-up can be retried.
+                      ? AppRefreshable(
+                          onRefresh: () => _fetchAll(silent: false),
+                          child: CropService.instance.offline
+                              ? const AppOfflineState()
+                              : const AppNoCropState(),
                         )
                       : RefreshIndicator(
                           color: AppColors.green,

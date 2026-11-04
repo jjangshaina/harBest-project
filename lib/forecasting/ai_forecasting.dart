@@ -1,5 +1,8 @@
 // UNTESTED: written without a Flutter compiler. Replaces the mock-data version.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
@@ -8,6 +11,8 @@ import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/services/forecast_service.dart';
+import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
 
@@ -44,8 +49,10 @@ _Forecast _parse(Map<String, dynamic> v, double k) {
   List<FlSpot> line(String key) => [
     FlSpot(0, now),
     for (final f in fc)
-      FlSpot((f['horizon_min'] as num).toDouble() / 60.0,
-          (f[key] as num).toDouble() * k),
+      FlSpot(
+        (f['horizon_min'] as num).toDouble() / 60.0,
+        (f[key] as num).toDouble() * k,
+      ),
   ];
   return _Forecast(actual, line('value'), line('upper'), line('lower'));
 }
@@ -68,47 +75,173 @@ class AiForecasting extends StatefulWidget {
   State<AiForecasting> createState() => _AiForecastingState();
 }
 
-class _AiForecastingState extends State<AiForecasting> {
+class _AiForecastingState extends State<AiForecasting>
+    with OfflineNotice<AiForecasting> {
+  // ── NO INTERNET ──
+  @override
+  int get tabIndex => 3;
+
+  @override
+  bool get hasLastData => _run != null;
+
+  @override
+  void onBackOnline() => _load();
+
+  // Device whose forecast is on screen.
+  String? _loadedDevice;
+
   String _sensorKey = kSensors.first.key;
   Map<String, dynamic>? _run;
   bool _loading = true;
   String? _error;
+  Object? _latestTimestamp; // newest sensor_readings.timestamp
+
+  // Re-reads the newest reading every 30s; this also keeps "Updated x mins
+  // ago" counting up.
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     CropService.instance.addListener(_load);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _timer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _load(), // forecast + "Updated ... ago", without a spinner
+    );
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     CropService.instance.removeListener(_load);
     super.dispose();
   }
 
-  Future<void> _load() async {
+  /// Loads the newest forecast. Runs on start, on crop changes, on
+  /// pull-to-refresh ([userAction]) and when the connection comes back.
+  /// The forecast already on screen stays there while this runs, and stays
+  /// if it fails for lack of internet.
+  Future<void> _load({bool userAction = false}) async {
     if (!mounted || !CropService.instance.loaded) return;
+    if (userAction && CropService.instance.offline) {
+      await CropService.instance.load(); // retry a failed crop list
+      if (!mounted) return;
+    }
     final id = CropService.instance.selected?.deviceId;
+    final firstLoad = id != _loadedDevice;
+    if (firstLoad) {
+      // Another crop: never show the previous crop's forecast.
+      _run = null;
+      _latestTimestamp = null;
+    }
+    _loadedDevice = id;
     setState(() {
-      _loading = true;
+      // Spinner only for a crop's first load, never for the 30 s refresh.
+      _loading = firstLoad && _run == null && id != null;
       _error = null;
     });
+    _fetchLatestReading();
+    if (id == null) {
+      setState(() => _loading = false);
+      if (CropService.instance.offline) {
+        markConnection(false, userAction: userAction);
+      }
+      return;
+    }
     try {
-      final run = id == null ? null : await ForecastService.latest(id);
-      if (!mounted) return;
+      final run = await ForecastService.latest(id).timeout(kRequestTimeout);
+      if (!mounted || id != _loadedDevice) return;
+      markConnection(true);
+      LastData.save('forecast_$id', run);
       setState(() {
         _run = run;
         _loading = false;
       });
     } catch (e) {
       debugPrint('Forecast load error: $e');
-      if (!mounted) return;
+      if (!mounted || id != _loadedDevice) return;
+      final noInternet = isConnectionError(e);
+      // No internet and nothing on screen yet: use the forecast saved on
+      // the phone.
+      if (noInternet && _run == null) {
+        final saved = await LastData.read('forecast_$id');
+        if (!mounted || id != _loadedDevice) return;
+        if (saved is Map) _run = Map<String, dynamic>.from(saved);
+      }
       setState(() {
-        _error = 'Could not load the forecast. Pull down to retry.';
+        if (_run == null && !noInternet) {
+          _error = 'Could not load the forecast. Pull down to retry.';
+        }
         _loading = false;
       });
+      if (noInternet) markConnection(false, userAction: userAction);
     }
+  }
+
+  // Newest sensor reading for the selected crop (drives "Updated ...").
+  Future<void> _fetchLatestReading() async {
+    final id = CropService.instance.selected?.deviceId;
+    if (id == null) {
+      if (mounted) setState(() => _latestTimestamp = null);
+      return;
+    }
+    try {
+      final rows = await Supabase.instance.client
+          .from('sensor_readings')
+          .select('timestamp')
+          .eq('device_id', id)
+          .order('timestamp', ascending: false)
+          .limit(1)
+          .timeout(kRequestTimeout);
+      if (!mounted || CropService.instance.selected?.deviceId != id) return;
+      markConnection(true);
+      final ts = rows.isEmpty ? null : rows.first['timestamp'];
+      LastData.save('latest_reading_$id', ts);
+      setState(() => _latestTimestamp = ts);
+    } catch (e) {
+      debugPrint('Latest reading fetch error: $e');
+      if (!mounted || !isConnectionError(e)) return;
+      // Opened offline: "Updated ... ago" from the time saved on the phone.
+      if (_latestTimestamp == null) {
+        final saved = await LastData.read('latest_reading_$id');
+        if (!mounted || CropService.instance.selected?.deviceId != id) return;
+        if (saved != null) setState(() => _latestTimestamp = saved);
+      }
+      // Runs every 30 s, so this is also what notices a lost connection.
+      markConnection(false);
+    }
+  }
+
+  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
+  // clock fields are already local time, so they are rebuilt as a local
+  // DateTime before comparing with now (same as the Plant Profile page).
+  String _updatedText() {
+    final raw = _latestTimestamp;
+    if (raw == null) return '';
+    final utc = DateTime.tryParse(raw.toString())?.toUtc();
+    if (utc == null) return '';
+    final dt = DateTime(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
+    final diff = DateTime.now().difference(dt);
+
+    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'Updated $m min${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
+    }
+    final d = diff.inDays;
+    return 'Updated $d day${d == 1 ? '' : 's'} ago';
   }
 
   SensorDef get _def => kSensors.firstWhere(
@@ -143,7 +276,7 @@ class _AiForecastingState extends State<AiForecasting> {
     width: double.infinity,
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.12),
+      color: color.withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(AppRadius.field),
     ),
     child: Text(text, style: AppText.body.copyWith(fontSize: 13, height: 1.4)),
@@ -173,7 +306,8 @@ class _AiForecastingState extends State<AiForecasting> {
     if (minX >= 0) minX = -(maxX / 2);
 
     final ys = <double>[
-      for (final s in [f.actual, f.predicted, f.upper, f.lower]) ...s.map((p) => p.y),
+      for (final s in [f.actual, f.predicted, f.upper, f.lower])
+        ...s.map((p) => p.y),
       ?optLo,
       ?optHi,
     ];
@@ -216,7 +350,7 @@ class _AiForecastingState extends State<AiForecasting> {
                   HorizontalRangeAnnotation(
                     y1: optLo,
                     y2: optHi!,
-                    color: AppColors.optimal.withOpacity(0.12),
+                    color: AppColors.optimal.withValues(alpha: 0.12),
                   ),
                 ],
         ),
@@ -231,8 +365,12 @@ class _AiForecastingState extends State<AiForecasting> {
           ],
         ),
         titlesData: FlTitlesData(
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
@@ -240,7 +378,10 @@ class _AiForecastingState extends State<AiForecasting> {
               interval: yStep,
               getTitlesWidget: (y, _) => Text(
                 y.toStringAsFixed(def.decimals),
-                style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppColors.textSecondary,
+                ),
               ),
             ),
           ),
@@ -253,7 +394,10 @@ class _AiForecastingState extends State<AiForecasting> {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   _axisLabel(x),
-                  style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
             ),
@@ -263,7 +407,7 @@ class _AiForecastingState extends State<AiForecasting> {
           BetweenBarsData(
             fromIndex: 2,
             toIndex: 3,
-            color: _forecastColor.withOpacity(0.22),
+            color: _forecastColor.withValues(alpha: 0.22),
           ),
         ],
         lineBarsData: [
@@ -302,7 +446,10 @@ class _AiForecastingState extends State<AiForecasting> {
     children: [
       Container(width: box ? 12 : 16, height: box ? 12 : 3, color: c),
       const SizedBox(width: 4),
-      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+      Text(
+        label,
+        style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+      ),
     ],
   );
 
@@ -323,17 +470,37 @@ class _AiForecastingState extends State<AiForecasting> {
     ),
   );
 
+  Future<void> _refresh() => _load(userAction: true);
+
   Widget _body() {
+    // Every state below can be pulled down to refresh.
+    if (CropService.instance.loaded && CropService.instance.selected == null) {
+      return AppRefreshable(
+        onRefresh: _refresh,
+        child: CropService.instance.offline
+            ? const AppOfflineState()
+            : const AppNoCropState(),
+      );
+    }
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Text(_error!, style: AppText.subtitle));
     if (_run == null) {
-      return const Center(
-        child: Text('No forecast has been generated yet.', style: AppText.subtitle),
+      return AppRefreshable(
+        onRefresh: _refresh,
+        child: offline
+            ? const AppOfflineState()
+            : Center(
+                child: Text(
+                  _error ?? 'No forecast has been generated yet.',
+                  textAlign: TextAlign.center,
+                  style: AppText.subtitle,
+                ),
+              ),
       );
     }
     final def = _def;
     final v = _variable;
     final k = _sensorKey == 'EC' ? 0.001 : 1.0; // µS/cm -> mS/cm
+    // ... the rest of the method stays exactly as it is
 
     final children = <Widget>[
       SensorChipSelector(
@@ -351,8 +518,10 @@ class _AiForecastingState extends State<AiForecasting> {
     }
     if (_run!['stale'] == true) {
       children.addAll([
-        _banner('Waiting for new sensor data. The forecast is based on older readings.',
-            AppColors.caution),
+        _banner(
+          'Waiting for new sensor data. The forecast is based on older readings.',
+          AppColors.caution,
+        ),
         const SizedBox(height: AppSpace.gap),
       ]);
     }
@@ -363,12 +532,22 @@ class _AiForecastingState extends State<AiForecasting> {
           width: double.infinity,
           child: AppCard(
             padding: const EdgeInsets.all(20),
-            child: Text('A forecast for ${def.label} is not available yet.',
-                style: AppText.subtitle),
+            child: Text(
+              'A forecast for ${def.label} is not available yet.',
+              style: AppText.subtitle,
+            ),
           ),
         ),
       );
-      return ListView(padding: const EdgeInsets.all(AppSpace.page), children: children);
+      return RefreshIndicator(
+        color: AppColors.green,
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(AppSpace.page),
+          children: children,
+        ),
+      );
     }
 
     final status = v['status'] as String;
@@ -396,27 +575,44 @@ class _AiForecastingState extends State<AiForecasting> {
               const SizedBox(height: 12),
               SizedBox(height: 200, child: _chart(v, def, k)),
               const SizedBox(height: 10),
-              Wrap(spacing: 14, runSpacing: 6, children: [
-                _legendItem(AppColors.healthy, 'Actual'),
-                _legendItem(_forecastColor, 'Forecast'),
-                _legendItem(_forecastColor.withOpacity(0.25), 'Confidence range', box: true),
-                if (v['optimal'] != null)
-                  _legendItem(AppColors.optimal.withOpacity(0.2), 'Optimal', box: true),
-              ]),
+              Wrap(
+                spacing: 14,
+                runSpacing: 6,
+                children: [
+                  _legendItem(AppColors.healthy, 'Actual'),
+                  _legendItem(_forecastColor, 'Forecast'),
+                  _legendItem(
+                    _forecastColor.withValues(alpha: 0.25),
+                    'Confidence range',
+                    box: true,
+                  ),
+                  if (v['optimal'] != null)
+                    _legendItem(
+                      AppColors.optimal.withValues(alpha: 0.2),
+                      'Optimal',
+                      box: true,
+                    ),
+                ],
+              ),
             ],
           ),
         ),
       ),
       const SizedBox(height: AppSpace.gap),
-      Row(children: [
-        _infoCard(
-          'Predicted in ${_horizonText(last['horizon_min'] as num)}',
-          '${((last['value'] as num).toDouble() * k).toStringAsFixed(def.decimals)}${def.unit}',
-          badge: AppStatusPill(text: _statusLabel(status), color: _statusColor(status)),
-        ),
-        const SizedBox(width: AppSpace.gap),
-        _infoCard('Leaves optimal range', leaveText),
-      ]),
+      Row(
+        children: [
+          _infoCard(
+            'Predicted in ${_horizonText(last['horizon_min'] as num)}',
+            '${((last['value'] as num).toDouble() * k).toStringAsFixed(def.decimals)}${def.unit}',
+            badge: AppStatusPill(
+              text: _statusLabel(status),
+              color: _statusColor(status),
+            ),
+          ),
+          const SizedBox(width: AppSpace.gap),
+          _infoCard('Leaves optimal range', leaveText),
+        ],
+      ),
       const SizedBox(height: AppSpace.gap),
       SizedBox(
         width: double.infinity,
@@ -427,7 +623,10 @@ class _AiForecastingState extends State<AiForecasting> {
             children: [
               Text('Suggested action', style: AppText.label),
               const SizedBox(height: 6),
-              Text(v['suggested_action'] as String, style: AppText.body.copyWith(fontSize: 14)),
+              Text(
+                v['suggested_action'] as String,
+                style: AppText.body.copyWith(fontSize: 14),
+              ),
             ],
           ),
         ),
@@ -438,7 +637,7 @@ class _AiForecastingState extends State<AiForecasting> {
 
     return RefreshIndicator(
       color: AppColors.green,
-      onRefresh: _load,
+      onRefresh: _refresh,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpace.page),
@@ -449,9 +648,13 @@ class _AiForecastingState extends State<AiForecasting> {
 
   @override
   Widget build(BuildContext context) {
+    final updated = _updatedText();
     return Column(
       children: [
-        const AppHeader(title: 'AI Forecasting'),
+        AppHeader(
+          title: 'AI Forecasting',
+          subtitle: updated.isEmpty ? null : updated,
+        ),
         Expanded(child: _body()),
       ],
     );
@@ -493,14 +696,18 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
         ? n.metrics
         : null;
     if (m == null || m.viewportDimension <= 0) return false;
-    final size = (m.viewportDimension / (m.maxScrollExtent + m.viewportDimension))
-        .clamp(0.05, 1.0);
+    final size =
+        (m.viewportDimension / (m.maxScrollExtent + m.viewportDimension)).clamp(
+          0.05,
+          1.0,
+        );
     final start = m.maxScrollExtent <= 0
         ? 0.0
         : (m.pixels / m.maxScrollExtent).clamp(0.0, 1.0) * (1 - size);
     final next = (start, size);
     final phase = WidgetsBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+    if (phase == SchedulerPhase.idle ||
+        phase == SchedulerPhase.postFrameCallbacks) {
       _mini.value = next;
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -526,7 +733,10 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
         Widget bar(double width, Color color) => Container(
           height: 4,
           width: width,
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
         );
 
         return GestureDetector(
@@ -541,7 +751,10 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
                 builder: (_, v, _) => Stack(
                   children: [
                     bar(w, Colors.grey.shade300),
-                    Positioned(left: v.$1 * w, child: bar(v.$2 * w, Colors.grey.shade600)),
+                    Positioned(
+                      left: v.$1 * w,
+                      child: bar(v.$2 * w, Colors.grey.shade600),
+                    ),
                   ],
                 ),
               ),
@@ -583,7 +796,9 @@ class _SensorChipSelectorState extends State<SensorChipSelector> {
                   showCheckmark: false,
                   selectedColor: AppColors.green,
                   backgroundColor: Colors.white,
-                  side: BorderSide(color: selected ? AppColors.green : AppColors.track),
+                  side: BorderSide(
+                    color: selected ? AppColors.green : AppColors.track,
+                  ),
                   shape: const StadiumBorder(),
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   onSelected: (_) {

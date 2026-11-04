@@ -66,7 +66,7 @@ class AppButton extends StatelessWidget {
     } else {
       final s = ElevatedButton.styleFrom(
         backgroundColor: base,
-        disabledBackgroundColor: base.withOpacity(0.6),
+        disabledBackgroundColor: base.withValues(alpha: 0.6),
         foregroundColor: Colors.white,
         elevation: 0,
         minimumSize: minSize,
@@ -159,7 +159,7 @@ class AppBackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return CircleAvatar(
       radius: 20,
-      backgroundColor: Colors.white.withOpacity(0.9),
+      backgroundColor: Colors.white.withValues(alpha: 0.9),
       child: IconButton(
         icon: const Icon(AppIcons.back, color: Colors.black, size: 18),
         onPressed: onPressed ?? () => Navigator.pop(context),
@@ -214,7 +214,7 @@ class AppLandingButton extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withValues(alpha: 0.3),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -224,7 +224,7 @@ class AppLandingButton extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
+              color: Colors.white.withValues(alpha: 0.9),
               fontSize: 20,
               fontWeight: FontWeight.w600,
             ),

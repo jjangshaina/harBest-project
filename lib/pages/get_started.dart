@@ -202,7 +202,7 @@ class _GetStartedState extends State<GetStarted> {
 
       await userCredential.user!.sendEmailVerification();
 
-      if (!context.mounted) return;
+      if (!mounted) return;
 
       Navigator.pushAndRemoveUntil(
         context,
@@ -210,10 +210,10 @@ class _GetStartedState extends State<GetStarted> {
         (_) => false,
       );
     } on FirebaseAuthException catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       _showSnackBar(_mapFirebaseError(e));
     } catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       _showSnackBar('An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -250,7 +250,7 @@ class _GetStartedState extends State<GetStarted> {
 
           AuthField(
             label: 'Email address',
-            hint: 'name@example.com',
+            hint: 'name@gmail.com',
             icon: AppIcons.mail,
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
@@ -389,7 +389,7 @@ class _GetStartedState extends State<GetStarted> {
 
           AuthFooterLink(
             prompt: 'Already have an account?',
-            linkText: 'Sign in',
+            linkText: 'Get started',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const LogIn()),
