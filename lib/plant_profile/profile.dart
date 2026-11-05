@@ -14,6 +14,7 @@ import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show normalizeReading;
+import 'package:flutter_application_harbest_1/services/ai_insights_service.dart';
 
 /// Represents one stage in the plant's growth cycle.
 /// [name] is the short label under each step; [title] is the descriptive
@@ -409,6 +410,15 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   // window feeds the trend notes in the recommendations.
   static const int _recentReadingsWindow = 20;
 
+  // ── AI (Gemini) insights, saved by the gemini-advisor Edge Function ──
+  // When a fresh AI recommendation exists it replaces the rule-based cards;
+  // otherwise the rule-based cards from insight_rules.dart are shown.
+  AiRecommendation? _aiRec;
+  List<GrowthObservation> _growthObs = []; // newest first
+  StreamSubscription<AiRecommendation?>? _aiRecSub;
+  StreamSubscription<List<GrowthObservation>>? _growthSub;
+  String? _aiDeviceId;
+
   @override
   void initState() {
     super.initState();
@@ -427,6 +437,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   void dispose() {
     _timer?.cancel();
     _peekTimer?.cancel();
+    _aiRecSub?.cancel();
+    _growthSub?.cancel();
     _scroll.dispose();
     CropService.instance.removeListener(_onCropChanged);
     super.dispose();
@@ -441,7 +453,36 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       _readingsError = null;
       _showTop = false;
     });
+    _subscribeAi(CropService.instance.selected?.deviceId);
     _fetchAll();
+  }
+
+  /// Live AI recommendation + photo analyses for the selected crop's device.
+  /// Only reconnects when the device actually changes.
+  void _subscribeAi(String? deviceId) {
+    if (deviceId == _aiDeviceId) return;
+    _aiDeviceId = deviceId;
+    _aiRecSub?.cancel();
+    _growthSub?.cancel();
+    _aiRecSub = null;
+    _growthSub = null;
+    setState(() {
+      _aiRec = null;
+      _growthObs = [];
+    });
+    if (deviceId == null) return;
+    _aiRecSub = AiInsightsService.recommendation(deviceId).listen(
+      (rec) {
+        if (mounted && deviceId == _aiDeviceId) setState(() => _aiRec = rec);
+      },
+      onError: (e) => debugPrint('AI recommendation stream error: $e'),
+    );
+    _growthSub = AiInsightsService.growthHistory(deviceId).listen(
+      (list) {
+        if (mounted && deviceId == _aiDeviceId) setState(() => _growthObs = list);
+      },
+      onError: (e) => debugPrint('AI growth stream error: $e'),
+    );
   }
 
   Future<void> _fetchAll({bool silent = true}) async {
@@ -481,7 +522,10 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       // Forget hidden items whose sensor is back in range, so a new problem
       // later is not silently hidden.
       final before = _hidden.length;
-      _hidden.removeWhere((k, _) => !recs.any((r) => r.key == k));
+      // (AI items use 'ai:' keys and simply expire after the snooze time.)
+      _hidden.removeWhere(
+        (k, _) => !k.startsWith('ai:') && !recs.any((r) => r.key == k),
+      );
 
       setState(() {
         _plantInfo = {
@@ -633,6 +677,27 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       context,
       done
           ? 'Marked as done. We will keep checking this sensor.'
+          : 'Dismissed. It will return if things get worse.',
+      type: done ? AppSnackType.success : AppSnackType.info,
+    );
+  }
+
+  bool _isAiOpen(AiAction a) {
+    final h = _hidden[a.id];
+    if (h == null || DateTime.now().isAfter(h.until)) return true;
+    return _aiLevel(a).index > h.level; // got worse since it was hidden
+  }
+
+  Future<void> _hideAi(AiAction a, {required bool done}) async {
+    setState(() {
+      _hidden[a.id] = _Hidden(DateTime.now().add(_snoozeFor), _aiLevel(a).index);
+    });
+    await _saveHidden();
+    if (!mounted) return;
+    AppSnack.show(
+      context,
+      done
+          ? 'Marked as done. The AI will keep checking.'
           : 'Dismissed. It will return if things get worse.',
       type: done ? AppSnackType.success : AppSnackType.info,
     );
@@ -1060,7 +1125,11 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   /// go and it closes again.
   Widget _buildGrowthTimelineCard() {
     final days = _getDaysSincePlanting();
-    final currentIndex = days != null ? _getCurrentStageIndex(days) : -1;
+    final dayIndex = days != null ? _getCurrentStageIndex(days) : -1;
+    final camera = AiInsightsService.currentStage(_growthObs);
+    final cameraIndex = _cameraStageIndex(camera);
+    // Planting date decides the stage; without one, use what the camera sees.
+    final currentIndex = dayIndex >= 0 ? dayIndex : cameraIndex;
 
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -1085,7 +1154,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                _buildGrowthStepper(currentIndex),
+                _buildGrowthStepper(currentIndex, cameraIndex: cameraIndex),
+                if (_growthObs.isNotEmpty)
+                  _buildCameraTimeline(camera, dayIndex, cameraIndex),
               ],
             ),
           ),
@@ -1094,7 +1165,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  Widget _buildGrowthStepper(int currentIndex) {
+  Widget _buildGrowthStepper(int currentIndex, {int cameraIndex = -1}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: List.generate(kGrowthStages.length, (i) {
@@ -1185,11 +1256,150 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                     ),
                   ),
                 ),
+                // Marks the stage the crop camera last saw.
+                if (i == cameraIndex)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 3),
+                    child: Icon(
+                      Icons.photo_camera_outlined,
+                      size: 14,
+                      color: AppColors.darkGreen,
+                    ),
+                  ),
               ],
             ),
           ),
         );
       }),
+    );
+  }
+
+  /// Camera stage (seedling / vegetative / mature) -> kGrowthStages index.
+  /// Germination can't be seen from above, so the camera never reports it.
+  int _cameraStageIndex(GrowthObservation? o) => switch (o?.stage) {
+        'seedling' => 1,
+        'vegetative' => 2,
+        'mature' => 3,
+        _ => -1,
+      };
+
+  String _agoText(DateTime? t) {
+    if (t == null) return '';
+    final d = DateTime.now().difference(t);
+    if (d.isNegative || d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours} h ago';
+    if (d.inDays < 7) return '${d.inDays} d ago';
+    return '${t.month}/${t.day}';
+  }
+
+  /// Under the tracker: what the camera sees now, whether it agrees with the
+  /// planting-date estimate, and the last few photo checks.
+  Widget _buildCameraTimeline(
+    GrowthObservation? camera,
+    int dayIndex,
+    int cameraIndex,
+  ) {
+    final latest = _growthObs.first;
+    final recent = _growthObs.take(3).toList();
+    final mismatch = dayIndex >= 0 && cameraIndex >= 0 && dayIndex != cameraIndex;
+
+    Color dotColor(GrowthObservation o) => switch (o.leafCondition) {
+          'healthy' => AppColors.optimal,
+          'mild_issue' => AppColors.caution,
+          'severe_issue' => AppColors.critical,
+          _ => AppColors.textTertiary,
+        };
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.track,
+          borderRadius: BorderRadius.circular(AppRadius.field),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.photo_camera_outlined,
+                  size: 15,
+                  color: AppColors.darkGreen,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    camera != null
+                        ? 'Camera sees: ${camera.stageLabel}'
+                        : 'Camera: stage not clear from photos yet',
+                    style: AppText.label.copyWith(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                Text(
+                  _agoText((camera ?? latest).takenAt),
+                  style: AppText.caption.copyWith(fontSize: 11),
+                ),
+              ],
+            ),
+            if (mismatch)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 21),
+                child: Text(
+                  'Planting date says ${kGrowthStages[dayIndex].name}. '
+                  'Check the plants or the planting date.',
+                  style: AppText.caption.copyWith(
+                    fontSize: 11,
+                    color: AppColors.caution,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            for (final o in recent)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, left: 3, right: 10),
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: dotColor(o),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        o.summary,
+                        style: AppText.body.copyWith(fontSize: 12.5),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _agoText(o.takenAt),
+                      style: AppText.caption.copyWith(fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            Text(
+              'From AI photo checks - a guide, not a diagnosis.',
+              style: AppText.caption.copyWith(fontSize: 10.5),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1505,6 +1715,338 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
+  // ── AI (Gemini) helpers ──
+
+  /// A fresh AI recommendation replaces the rule-based cards. "Fresh" = the
+  /// advisor ran in the last 3 hours (it runs every 15 minutes).
+  bool get _aiActive => _aiRec != null && _aiRec!.isFresh();
+
+  HealthLevel _aiLevel(AiAction a) => switch (a.severity) {
+        AiSeverity.critical => HealthLevel.critical,
+        AiSeverity.caution => HealthLevel.caution,
+        AiSeverity.info => HealthLevel.optimal,
+      };
+
+  InsightCategory _aiCategory(AiAction a) => switch (a.filter) {
+        AiFilter.water => InsightCategory.water,
+        AiFilter.nutrient => InsightCategory.nutrient,
+        AiFilter.growth => InsightCategory.growth,
+      };
+
+  IconData _aiIcon(AiAction a) => switch (a.category) {
+        'irrigation' => AppIcons.moisture,
+        'soil_ph' => AppIcons.soilPh,
+        'fertilizer' => AppIcons.nitrogen,
+        'climate' => AppIcons.temperature,
+        'sensor' => AppIcons.sensors,
+        _ => AppIcons.plant, // pest, disease
+      };
+
+  /// Sensors each AI category is about. Used to show the live value, target
+  /// and score bar from the rule-based check under the AI advice, so the
+  /// numbers on the card are always the exact sensor values.
+  static const Map<String, List<String>> _aiCategorySensors = {
+    'irrigation': ['moisture'],
+    'soil_ph': ['pH'],
+    'fertilizer': ['nitrogen', 'phosphorus', 'potassium', 'EC'],
+    'climate': ['heat_index', 'temperature', 'humidity'],
+  };
+
+  /// Words that show which sensor an AI action is about.
+  static const Map<String, List<String>> _sensorWords = {
+    'temperature': ['temperature', 'temp '],
+    'heat_index': ['heat index', 'feels'],
+    'humidity': ['humid'],
+    'moisture': ['moist', 'water', 'dry', 'wet'],
+    'pH': ['ph', 'acid', 'alkalin', 'lime'],
+    'EC': ['ec ', 'salin', 'salt'],
+    'nitrogen': ['nitrogen', 'urea'],
+    'phosphorus': ['phosph'],
+    'potassium': ['potass', 'potash'],
+  };
+
+  /// Rule-based finding for the sensor the action talks about. If the text
+  /// names none, the most urgent finding in the same category, or null.
+  Recommendation? _ruleMatch(AiAction a) {
+    final keys = _aiCategorySensors[a.category];
+    if (keys == null) return null;
+    final text = ' ${a.title} ${a.reason} '.toLowerCase();
+    for (final key in keys) {
+      final named = _sensorWords[key]!.any(text.contains);
+      if (!named) continue;
+      for (final r in _recs) {
+        if (r.key == key) return r;
+      }
+    }
+    for (final r in _recs) {
+      if (keys.contains(r.key)) return r; // _recs is sorted most urgent first
+    }
+    return null;
+  }
+
+  List<AiAction> get _openAiActions =>
+      _aiRec?.actions.where(_isAiOpen).toList() ?? const [];
+
+  /// Small "AI" / "Rule-based" tag next to the section title.
+  Widget _sourceTag() {
+    final ai = _aiActive;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: ai ? AppColors.green.withOpacity(0.25) : AppColors.track,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            ai ? Icons.auto_awesome : AppIcons.tip,
+            size: 12,
+            color: AppColors.darkGreen,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            ai ? 'AI' : 'Rule-based',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.darkGreen,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The AI summary as a small card in the list under the filter chips.
+  Widget _buildAiInsightCard({
+    required IconData icon,
+    required String label,
+    required List<String> lines,
+    bool muted = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.cardGap),
+      child: SizedBox(
+        width: double.infinity,
+        child: _outlinedShadowCard(
+          color: AppColors.disabledStart,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 16, color: AppColors.darkGreen),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: AppText.label.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              for (final line in lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                    line,
+                    style: muted
+                        ? AppText.caption.copyWith(fontSize: 12.5)
+                        : AppText.body.copyWith(fontSize: 14, height: 1.4),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Only the AI summary is shown as an insight card (under "All").
+  List<Widget> _buildAiInsightCards() {
+    final rec = _aiRec!;
+    return [
+      if (_filter == null && rec.summary.isNotEmpty)
+        _buildAiInsightCard(
+          icon: Icons.auto_awesome,
+          label: 'AI SUMMARY',
+          lines: [rec.summary],
+        ),
+    ];
+  }
+
+  /// Filter chips, then the AI's insights, then its actions (priorities
+  /// first). Same layout as the rule-based list.
+  Widget _buildAiRecommendations() {
+    final open = _openAiActions; // most urgent first
+    bool inFilter(AiAction a) => _filter == null || _aiCategory(a) == _filter;
+    final priorities = open
+        .where((a) => a.severity != AiSeverity.info && inFilter(a))
+        .toList();
+    final others = open
+        .where((a) => a.severity == AiSeverity.info && inFilter(a))
+        .toList();
+    final insights = _buildAiInsightCards();
+    final noActions = priorities.isEmpty && others.isEmpty;
+
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: AppSpace.cardGap),
+          _buildFilterChips(),
+          const SizedBox(height: AppSpace.cardGap),
+          for (final a in priorities) _buildAiRecCard(a, priority: true),
+          ...insights,
+          for (final a in others) _buildAiRecCard(a),
+          if (noActions)
+            _filter == null && open.isEmpty && insights.isEmpty
+                ? const SizedBox(
+                    width: double.infinity,
+                    height: 240,
+                    child: AppEmptyState(
+                      icon: AppIcons.success,
+                      title: 'All clear',
+                      message:
+                          'The AI found nothing that needs your attention right now.',
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.symmetric(vertical: AppSpace.section),
+                    child: Center(
+                      child: Text(
+                        _filter == null
+                            ? 'No actions needed right now.'
+                            : 'No ${_filter!.label.toLowerCase()} recommendations right now.',
+                        style: AppText.subtitle,
+                      ),
+                    ),
+                  ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              'AI advice can be wrong - check your plants before acting.',
+              style: AppText.caption.copyWith(fontSize: 11),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One AI action, in the same card style as the rule-based ones. The live
+  /// value / target line and score bar come from the matching sensor.
+  Widget _buildAiRecCard(AiAction a, {bool priority = false}) {
+    final level = _aiLevel(a);
+    final color = level.color;
+    final match = _ruleMatch(a);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.cardGap),
+      child: SizedBox(
+        width: double.infinity,
+        child: _outlinedShadowCard(
+          color: color,
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (priority) ...[
+                Row(
+                  children: [
+                    Text(
+                      'TOP PRIORITY',
+                      style: AppText.label.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    AppStatusPill.level(level),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+              Row(
+                children: [
+                  Icon(_aiIcon(a), size: 22, color: color),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          a.title,
+                          style: AppText.body.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (match != null || a.when.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            [
+                              if (match != null) match.subtitle,
+                              if (a.when.isNotEmpty) a.when,
+                            ].join(' · '),
+                            style: AppText.caption.copyWith(fontSize: 12),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (!priority) ...[
+                    const SizedBox(width: 8),
+                    AppStatusPill.level(level),
+                  ],
+                ],
+              ),
+              if (match != null) ...[
+                const SizedBox(height: 10),
+                AppProgressBar(
+                  value: match.score / 100,
+                  color: match.level.color,
+                  height: 6,
+                ),
+              ],
+              if (a.reason.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _messageBox(a.reason),
+              ],
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.only(left: 36),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    _pillButton(
+                      'Mark as done',
+                      filled: true,
+                      onTap: () => _hideAi(a, done: true),
+                    ),
+                    _pillButton(
+                      'Dismiss',
+                      filled: false,
+                      onTap: () => _hideAi(a, done: false),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Insights & Recommendations (moved here from the Insights page) ──
 
   /// "Insights & Recommendation" card: title and the Actions / Priorities /
@@ -1519,17 +2061,26 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'INSIGHTS & RECOMMENDATION',
-                style: AppText.label.copyWith(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'INSIGHTS & RECOMMENDATION',
+                      style: AppText.label.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (_recentReadings.isNotEmpty) _sourceTag(),
+                ],
               ),
               const SizedBox(height: 12),
               if (_recentReadings.isEmpty)
                 _buildNoReadings()
+              else if (_aiActive)
+                _buildAiSummaryStrip(_openAiActions)
               else
                 _buildSummaryStrip(_recs.where(_isOpen).toList()),
             ],
@@ -1580,6 +2131,26 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
+  Widget _buildAiSummaryStrip(List<AiAction> open) {
+    final critical = open.where((a) => a.severity == AiSeverity.critical).length;
+    final priorities = open.where((a) => a.severity != AiSeverity.info).length;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.track,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      child: Row(
+        children: [
+          _stat('Actions', '${open.length}'),
+          _stat('Priorities', '$priorities'),
+          _stat('Critical', '$critical'),
+        ],
+      ),
+    );
+  }
+
   Widget _stat(String label, String value) {
     return Expanded(
       child: Column(
@@ -1602,6 +2173,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   /// not inside the insights card. All priorities come first, the rest after.
   Widget _buildRecommendations() {
     if (_recentReadings.isEmpty) return const SizedBox.shrink();
+    if (_aiActive) return _buildAiRecommendations();
 
     final open = _recs.where(_isOpen).toList(); // most urgent first
     if (open.isEmpty) {
