@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/card_info_button.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors, normalizeReading;
 
@@ -219,33 +220,46 @@ class HealthAnalyticsState extends State<HealthAnalytics> {
 
   // ───────────────────────── UI HELPERS ─────────────────────────
 
-  Widget _card({
-    required String title,
-    required String subtitle,
-    required Widget body,
-    String? caption,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      child: AppCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: AppText.cardTitle),
-            const SizedBox(height: 2),
-            Text(subtitle, style: AppText.subtitle),
-            const SizedBox(height: 12),
-            body,
-            if (caption != null) ...[
-              const SizedBox(height: 8),
-              Text(caption, style: AppText.caption),
+Widget _card({
+  required String title,
+  required String subtitle,
+  required Widget body,
+  String? caption,
+}) {
+  return SizedBox(
+    width: double.infinity,
+    child: AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: AppText.cardTitle),
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: AppText.subtitle),
+                    ],
+                  ),
+                ),
+              ),
+              if (caption != null)
+                CardInfoButton(title: title, text: caption),
             ],
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          Padding(padding: const EdgeInsets.only(right: 8), child: body),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _message(String text, {VoidCallback? onRetry}) => SizedBox(
     height: 120,

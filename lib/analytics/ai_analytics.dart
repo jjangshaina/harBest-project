@@ -7,6 +7,7 @@ import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/analytics/health_analytics.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/widgets/card_info_button.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
@@ -223,6 +224,7 @@ class AiAnalytics extends StatefulWidget {
 
 class _AiAnalyticsState extends State<AiAnalytics> {
   final _supabase = Supabase.instance.client;
+  final _health = GlobalKey<HealthAnalyticsState>();
 
   // ── EDA cards state ──
   bool _edaLoading = true;
@@ -234,7 +236,6 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   final _daily = _Series<_DailyPt>();
   final _weekly = _Series<_WeeklyPt>();
   String _statKey = 'moisture'; // sensor driving every analytics card
-  final _health = GlobalKey<HealthAnalyticsState>();
 
   // Sensor chip row scrolling + minimap position (start, size as 0..1).
   final _chipScroll = ScrollController();
@@ -281,6 +282,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
     _fetchCoverage(),
     _fetchDaily(showSpinner: false),
     _fetchWeekly(showSpinner: false),
+    _health.currentState?.reload() ?? Future<void>.value(),
   ]);
 
   String? get _deviceId => CropService.instance.selected?.deviceId;
@@ -503,34 +505,53 @@ class _AiAnalyticsState extends State<AiAnalytics> {
 
   // ───────────────────────── SHARED UI ─────────────────────────
 
-  Widget _card({
-    required String title,
-    required String subtitle,
-    required Widget body,
-    double height = 200,
-    List<Widget> footer = const [],
-    String? caption,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      child: AppCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: AppText.cardTitle),
-            const SizedBox(height: 2),
-            Text(subtitle, style: AppText.subtitle),
-            const SizedBox(height: 12),
-            SizedBox(height: height, child: body),
-            const SizedBox(height: 6),
-            ...footer,
-            if (caption != null) Text(caption, style: AppText.caption),
-          ],
-        ),
+ Widget _card({
+  required String title,
+  required String subtitle,
+  required Widget body,
+  double height = 200,
+  List<Widget> footer = const [],
+  String? caption,
+}) {
+  return SizedBox(
+    width: double.infinity,
+    child: AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: AppText.cardTitle),
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: AppText.subtitle),
+                    ],
+                  ),
+                ),
+              ),
+              if (caption != null)
+                CardInfoButton(title: title, text: caption),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: SizedBox(height: height, child: body),
+          ),
+          const SizedBox(height: 6),
+          ...footer,
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _emptyBody(String message) => Center(
     child: Text(message, textAlign: TextAlign.center, style: _mutedStyle),
@@ -1137,6 +1158,11 @@ class _AiAnalyticsState extends State<AiAnalytics> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildCoverageBanner(),
+                      gap,
+                      HealthAnalytics(
+                        key: _health,
+                        deviceId: _deviceId,
+                      ), // ← add
                       gap,
                       _buildSensorSelector(),
                       gap,

@@ -239,6 +239,7 @@ class AppIcons {
   static const IconData up = CupertinoIcons.chevron_up;
 
   // Snack bar / feedback
+  static const IconData infoOutline = CupertinoIcons.info; // outlined "i" in a circle
   static const IconData success = CupertinoIcons.check_mark_circled_solid;
   static const IconData error = CupertinoIcons.exclamationmark_circle_fill;
   static const IconData info = CupertinoIcons.info_circle_fill;
