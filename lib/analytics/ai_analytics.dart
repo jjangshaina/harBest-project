@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
+import 'package:flutter_application_harbest_1/analytics/health_analytics.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
@@ -233,6 +234,7 @@ class _AiAnalyticsState extends State<AiAnalytics> {
   final _daily = _Series<_DailyPt>();
   final _weekly = _Series<_WeeklyPt>();
   String _statKey = 'moisture'; // sensor driving every analytics card
+  final _health = GlobalKey<HealthAnalyticsState>();
 
   // Sensor chip row scrolling + minimap position (start, size as 0..1).
   final _chipScroll = ScrollController();
