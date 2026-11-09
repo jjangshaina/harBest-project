@@ -1,0 +1,53 @@
+# Runs the HarBest forecast automatically every hour and saves the result to
+# Supabase (table forecast_runs), where the app's ForecastService picks it up.
+#
+# One-time setup in GitHub: Settings -> Secrets and variables -> Actions -> New secret
+#   SUPABASE_URL          https://<your-project>.supabase.co
+#   SUPABASE_SERVICE_KEY  the service_role key (Supabase -> Project Settings -> API)
+#                         Keep it ONLY here - never in the app or on the Pi.
+
+name: HarBest forecast
+
+on:
+  schedule:
+    - cron: "17 * * * *"      # every hour at :17 (GitHub uses UTC; hourly is the same anywhere)
+  workflow_dispatch:           # adds a "Run workflow" button for manual runs
+
+concurrency:
+  group: harbest-forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: forecasting
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: forecasting/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - name: Pull latest readings from Supabase
+        run: python fetch_readings.py --out sensor_readings_live.csv
+
+      - name: Train, forecast and push to Supabase
+        run: python harbest_forecast_pipeline.py --csv sensor_readings_live.csv --out output --push
+
+      - name: Keep this run's report and chart
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forecast-${{ github.run_number }}
+          path: forecasting/output/
+          retention-days: 14
