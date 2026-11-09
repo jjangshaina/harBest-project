@@ -6,7 +6,7 @@ import 'package:flutter_application_harbest_1/widgets/info_page.dart';
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Help & Support → Contact Us → Email
-const String kSupportEmail = 'Harbestcropanalytics@gmail.com';
+const String kSupportEmail = 'Harbestanalytics@gmail.com';
 
 /// Help & Support → Contact Us → Call us
 const String kSupportPhone = '09212345678';

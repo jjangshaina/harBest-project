@@ -124,6 +124,51 @@ class AppNoCropState extends StatelessWidget {
   }
 }
 
+/// Same message on every page when the selected crop has no data yet.
+class AppNoDataState extends StatelessWidget {
+  final String message;
+  final bool compact; // smaller version for use inside a card
+
+  const AppNoDataState({
+    super.key,
+    this.message = 'Your device has not sent any readings for this crop yet.',
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: 32,
+          vertical: compact ? 12 : 0,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              AppIcons.plant,
+              size: compact ? 40 : 56,
+              color: Colors.black26,
+            ),
+            const SizedBox(height: AppSpace.cardGap),
+            Text(
+              'No data found for this crop yet',
+              textAlign: TextAlign.center,
+              style: AppText.body.copyWith(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(message, textAlign: TextAlign.center, style: AppText.subtitle),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // NO INTERNET
 // ─────────────────────────────────────────────────────────────────────────

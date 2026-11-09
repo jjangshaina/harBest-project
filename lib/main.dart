@@ -2,15 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'pages/home_page.dart';
 import 'pages/user_dashboard.dart';
 import 'firebase_options.dart';
 import 'theme/app_style.dart';
 import 'pages/log_in.dart' show loginInProgress;
+import 'security/email_verification.dart' show PendingSignup;
+import 'widgets/app_walkthrough.dart';
+
+// ── Startup ──
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+const _missingConfigMessage = 'Missing Supabase configuration.';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,7 +24,7 @@ void main() {
 Future<void> _initializeServices() async {
   try {
     if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
-      throw StateError('Missing Supabase configuration.');
+      throw StateError(_missingConfigMessage);
     }
 
     await Firebase.initializeApp(
@@ -31,13 +35,15 @@ Future<void> _initializeServices() async {
       url: _supabaseUrl,
       anonKey: _supabaseAnonKey,
       accessToken: () async =>
-          await fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
+          fb_auth.FirebaseAuth.instance.currentUser?.getIdToken(),
     );
   } catch (error, stackTrace) {
     debugPrint('HarBest startup failed: $error\n$stackTrace');
     rethrow;
   }
 }
+
+// ── App ──
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -59,6 +65,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// Startup → (first launch only) walkthrough → AuthGate.
 class _AppStartup extends StatefulWidget {
   const _AppStartup();
 
@@ -67,18 +74,27 @@ class _AppStartup extends StatefulWidget {
 }
 
 class _AppStartupState extends State<_AppStartup> {
-  late final Future<void> _initialization = _initializeServices();
+  late final Future<bool> _startup = _boot();
+  bool _tourDone = false;
+
+  // Starts the services and checks whether this is the first time the app
+  // is opened (true = show the walkthrough). The check reads only the phone's
+  // storage and never throws, so it runs at the same time as the services.
+  Future<bool> _boot() async {
+    final showTour = AppWalkthrough.shouldShow();
+    await _initializeServices();
+    return showTour;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<void>(
-      future: _initialization,
+    return FutureBuilder<bool>(
+      future: _startup,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           final error = snapshot.error;
           final isMissingConfig =
-              error is StateError &&
-              error.message == 'Missing Supabase configuration.';
+              error is StateError && error.message == _missingConfigMessage;
           return _StartupErrorPage(
             message: isMissingConfig
                 ? 'Add SUPABASE_URL and SUPABASE_ANON_KEY to env.json, then launch using “HarBest (with env.json)”.'
@@ -87,13 +103,88 @@ class _AppStartupState extends State<_AppStartup> {
         }
 
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+          return const _LoadingScreen();
+        }
+
+        // First time the app is opened: walkthrough, then the normal flow.
+        if (snapshot.data == true && !_tourDone) {
+          return WalkthroughPage(
+            onFinish: () => setState(() => _tourDone = true),
           );
         }
 
         return const AuthGate();
       },
+    );
+  }
+}
+
+// Decides which screen to show based on Firebase Auth's own live session,
+// not a locally cached flag. A cached flag (like the one previously read
+// from secure storage) can drift out of sync with reality — e.g. it can
+// survive an app reinstall on iOS via Keychain persistence even after
+// Firebase's own session is gone, or stay "true" if a token is revoked in
+// the background. Checking authStateChanges() directly avoids that class
+// of bug entirely.
+//
+// While the Log In page is still running its own checks (loginInProgress),
+// this waits on the Welcome screen so the Dashboard is never built for a
+// login that is about to be rejected.
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // The auth stream is the outer builder so it is subscribed once;
+    // loginInProgress changes only rebuild the inner part.
+    return StreamBuilder<fb_auth.User?>(
+      stream: fb_auth.FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) => ValueListenableBuilder<bool>(
+        valueListenable: loginInProgress,
+        builder: (context, loggingIn, _) {
+          if (loggingIn) return const HomePage();
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const _LoadingScreen();
+          }
+
+          final user = snapshot.data;
+          if (user == null) return const HomePage();
+
+          // Defensive: the login flow already blocks unverified users and
+          // signs them straight back out, so a persisted session reaching
+          // here should already be verified. If that ever isn't true, don't
+          // let it through to the Dashboard.
+          //
+          // Exception: right after sign-up the new account is unverified ON
+          // PURPOSE while the Verify-your-email page waits for the link.
+          // Signing out then would destroy the session that page needs, so
+          // skip the sign-out while a sign-up is in progress.
+          if (!user.emailVerified) {
+            if (!PendingSignup.active) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                fb_auth.FirebaseAuth.instance.signOut();
+              });
+            }
+            return const HomePage();
+          }
+
+          return const UserDashboard();
+        },
+      ),
+    );
+  }
+}
+
+// ── Startup screens ──
+
+class _LoadingScreen extends StatelessWidget {
+  const _LoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 }
@@ -127,55 +218,6 @@ class _StartupErrorPage extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-// Decides which screen to show based on Firebase Auth's own live session,
-// not a locally cached flag. A cached flag (like the one previously read
-// from secure storage) can drift out of sync with reality — e.g. it can
-// survive an app reinstall on iOS via Keychain persistence even after
-// Firebase's own session is gone, or stay "true" if a token is revoked in
-// the background. Checking authStateChanges() directly avoids that class
-// of bug entirely.
-//
-// While the Log In page is still running its own checks (loginInProgress),
-// this waits on the Welcome screen so the Dashboard is never built for a
-// login that is about to be rejected.
-class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: loginInProgress,
-      builder: (context, loggingIn, _) => StreamBuilder<fb_auth.User?>(
-        stream: fb_auth.FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          if (loggingIn) return const HomePage();
-
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-
-          final user = snapshot.data;
-
-          // Defensive: the login flow already blocks unverified users and
-          // signs them straight back out, so a persisted session reaching
-          // here should already be verified. If that ever isn't true, don't
-          // let it through to the Dashboard.
-          if (user != null && !user.emailVerified) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              fb_auth.FirebaseAuth.instance.signOut();
-            });
-            return const HomePage();
-          }
-
-          return user != null ? const UserDashboard() : const HomePage();
-        },
       ),
     );
   }

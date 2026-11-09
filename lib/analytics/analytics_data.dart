@@ -1,16 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:fl_chart/fl_chart.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-import 'package:flutter_application_harbest_1/widgets/app_header.dart';
+
+import 'package:flutter_application_harbest_1/services/crop_services.dart';
+
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
-import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
+import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
-import 'package:flutter_application_harbest_1/services/crop_services.dart';
+import 'package:flutter_application_harbest_1/widgets/sensor_chip_selector.dart';
+
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
 
@@ -19,6 +23,10 @@ import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
 // eda_target_breakdown : crop_health (text), metric (text), avg_value (float8)
 // sensor_daily_rolling : day, sensor, daily_mean, rolling_7d_mean
 // sensor_weekly_avg    : week_end, sensor, weekly_mean, n_readings
+
+// ═════════════════════════════════════════════════════════════════════════
+// 1. CONSTANTS & STYLES
+// ═════════════════════════════════════════════════════════════════════════
 
 const int _dailyKeep = 30; // newest N days to chart
 const int _weeklyKeep = 12; // newest N weeks to chart
@@ -36,18 +44,23 @@ const Map<String, String> _shortNames = {
   'moisture': 'Moist',
 };
 
-const _axisStyle = TextStyle(fontSize: 10, color: AppColors.textSecondary);
-const _mutedStyle = TextStyle(color: AppColors.textTertiary, fontSize: 13);
-const _tooltipStyle = TextStyle(color: Colors.white, fontSize: 12);
-const _noTitles = AxisTitles(sideTitles: SideTitles(showTitles: false));
 const _months = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
 ];
 
-String _short(String name) => _shortNames[name.toLowerCase()] ?? name;
+const _axisStyle = TextStyle(fontSize: 10, color: AppColors.textSecondary);
+const _mutedStyle = TextStyle(color: AppColors.textTertiary, fontSize: 13);
+const _tooltipStyle = TextStyle(color: Colors.white, fontSize: 12);
+const _noTitles = AxisTitles(sideTitles: SideTitles(showTitles: false));
+
+// ═════════════════════════════════════════════════════════════════════════
+// 2. HELPERS — parsing, formatting, crop-health scoring
+// ═════════════════════════════════════════════════════════════════════════
 
 double? _toNum(dynamic v) => v is num ? v.toDouble() : double.tryParse('$v');
+
+String _short(String name) => _shortNames[name.toLowerCase()] ?? name;
 
 String _md(DateTime d, [bool year = false]) =>
     '${_months[d.month - 1]} ${d.day}${year ? ', ${d.year}' : ''}';
@@ -61,6 +74,12 @@ String _fmtRange(DateTime? a, DateTime? b) {
   return a.day == b.day ? _md(a, true) : '${_md(a)} – ${b.day}, ${a.year}';
 }
 
+String _dateLabel(DateTime? d, int index) =>
+    d == null ? '${index + 1}' : '${d.month}/${d.day}';
+
+String _axisFmt(double value, double range) =>
+    value.toStringAsFixed(range >= 20 ? 0 : (range >= 5 ? 1 : 2));
+
 // `crop_health` is TEXT, generated per-sensor. Scoring is pattern-based so
 // new "X Warning" labels score correctly without another edit.
 double? _scoreForCropHealth(String rawLabel) {
@@ -73,20 +92,16 @@ double? _scoreForCropHealth(String rawLabel) {
   return 90;
 }
 
-Color _colorForCropHealth(String label) {
-  final s = _scoreForCropHealth(label);
+// Color for a score from [_scoreForCropHealth].
+Color _colorForHealthScore(double? s) {
   if (s == null) return AppColors.textTertiary;
   if (s >= 90) return AppColors.healthy;
   return s >= 50 ? AppColors.caution : AppColors.critical;
 }
 
-String _axisFmt(double value, double range) =>
-    value.toStringAsFixed(range >= 20 ? 0 : (range >= 5 ? 1 : 2));
-
-String _dateLabel(DateTime? d, int index) =>
-    d == null ? '${index + 1}' : '${d.month}/${d.day}';
-
-// ── Shared chart pieces ──
+// ═════════════════════════════════════════════════════════════════════════
+// 3. SHARED CHART PIECES
+// ═════════════════════════════════════════════════════════════════════════
 
 FlGridData _grid(double interval, {bool zeroLine = false}) => FlGridData(
   show: true,
@@ -188,6 +203,10 @@ Widget _barChart({
   ),
 );
 
+// ═════════════════════════════════════════════════════════════════════════
+// 4. DATA MODELS
+// ═════════════════════════════════════════════════════════════════════════
+
 class _CorrPair {
   final String a, b;
   final double value;
@@ -217,6 +236,10 @@ class _Series<T> {
   List<T> data = [];
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+// 5. ANALYTICS PAGE
+// ═════════════════════════════════════════════════════════════════════════
+
 class AiAnalytics extends StatefulWidget {
   const AiAnalytics({super.key});
 
@@ -226,9 +249,71 @@ class AiAnalytics extends StatefulWidget {
 
 class _AiAnalyticsState extends State<AiAnalytics>
     with OfflineNotice<AiAnalytics> {
+  // ─────────────────────────── CONSTANTS ───────────────────────────
+
+  // How close (in pixels) to the bottom before "back to top" appears.
+  static const double _showTopWithin = 400;
+
+  // ─────────────────────────── SERVICES ───────────────────────────
+
   final _supabase = Supabase.instance.client;
 
-  // ── NO INTERNET ──
+  String? get _deviceId => CropService.instance.selected?.deviceId;
+
+  // ─────────────────────────── STATE ───────────────────────────
+
+  // Device whose charts are on screen; a crop-list update for the same
+  // device keeps them instead of reloading everything with spinners.
+  String? _loadedDevice;
+  String? _loadedCrop;
+  bool _started = false;
+
+  // Overall period covered by the data (earliest / latest reading).
+  DateTime? _covStart, _covEnd;
+
+  // EDA cards (correlations + health breakdown).
+  bool _edaLoading = true;
+  String? _edaError;
+  List<_CorrPair> _allCorrelations = []; // every unique pair, strongest first
+  Map<String, Map<String, double>> _breakdown = {}; // metric -> health -> avg
+
+  // Daily rolling / weekly average series.
+  final _daily = _Series<_DailyPt>();
+  final _weekly = _Series<_WeeklyPt>();
+  String _statKey = 'moisture'; // sensor driving every analytics card
+
+  // Page scroll: drives the "back to top" button.
+  final _pageScroll = ScrollController();
+  bool _showTop = false;
+
+  // Re-reads the newest reading every 30s; this also keeps "Updated x mins
+  // ago" counting up.
+  Timer? _timer;
+
+  // ─────────────────────────── LIFECYCLE ───────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+    _pageScroll.addListener(_onPageScroll);
+    CropService.instance.addListener(_onCropChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
+    _timer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _fetchCoverage(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    CropService.instance.removeListener(_onCropChanged);
+    _pageScroll.dispose();
+    super.dispose();
+  }
+
+  // ─────────────────────────── NO INTERNET (OfflineNotice) ───────────────────────────
+
   @override
   int get tabIndex => 1;
 
@@ -249,69 +334,20 @@ class _AiAnalyticsState extends State<AiAnalytics>
     _fetchWeekly(showSpinner: false);
   }
 
-  // Device whose charts are on screen; a crop-list update for the same
-  // device keeps them instead of reloading everything with spinners.
-  String? _loadedDevice;
-  bool _started = false;
-
-  // ── EDA cards state ──
-  bool _edaLoading = true;
-  String? _edaError;
-  List<_CorrPair> _allCorrelations = []; // every unique pair, strongest first
-  Map<String, Map<String, double>> _breakdown = {}; // metric -> health -> avg
-
-  // ── Daily rolling / weekly average state ──
-  final _daily = _Series<_DailyPt>();
-  final _weekly = _Series<_WeeklyPt>();
-  String _statKey = 'moisture'; // sensor driving every analytics card
-
-  // Sensor chip row scrolling + minimap position (start, size as 0..1).
-  final _chipScroll = ScrollController();
-  final _chipKeys = List.generate(kSensors.length, (_) => GlobalKey());
-  final _mini = ValueNotifier<(double, double)>((0.0, 1.0));
-
-  // Page scroll: drives the "back to top" button.
-  final _pageScroll = ScrollController();
-  bool _showTop = false;
-  // How close (in pixels) to the bottom before the button appears.
-  static const double _showTopWithin = 400;
-
-  // Overall period covered by the data (earliest / latest reading).
-  DateTime? _covStart, _covEnd;
-
-  // Re-reads the newest reading every 30s; this also keeps "Updated x mins
-  // ago" counting up.
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _pageScroll.addListener(_onPageScroll);
-    CropService.instance.addListener(_onCropChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onCropChanged());
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchCoverage());
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    CropService.instance.removeListener(_onCropChanged);
-    _pageScroll.dispose();
-    _chipScroll.dispose();
-    _mini.dispose();
-    super.dispose();
-  }
+  // ─────────────────────────── CROP SELECTION & REFRESH ───────────────────────────
 
   // Runs when crops finish loading or the user picks another crop.
   void _onCropChanged() {
     if (!mounted || !CropService.instance.loaded) return;
     final id = _deviceId;
-    if (_started && id == _loadedDevice) {
-      setState(() {}); // same device: keep the charts on screen
+    final cropId = CropService.instance.selected?.id;
+    if (_started && id == _loadedDevice && cropId == _loadedCrop) {
+      setState(() {}); // same crop: keep the charts on screen
       return;
     }
     _started = true;
     _loadedDevice = id;
+    _loadedCrop = cropId;
     // Another device: drop the old charts so they are never shown for it.
     setState(() {
       _allCorrelations = [];
@@ -361,9 +397,98 @@ class _AiAnalyticsState extends State<AiAnalytics>
     return message;
   }
 
-  String? get _deviceId => CropService.instance.selected?.deviceId;
+  // ─────────────────────────── DATA: COVERAGE ───────────────────────────
 
-  // ───────────────────────── DATA ─────────────────────────
+  // Earliest and latest reading for this device (the overall coverage).
+  Future<void> _fetchCoverage({bool userAction = false}) async {
+    final id = _deviceId;
+    try {
+      Future<DateTime?> edge(String deviceId, bool asc) async {
+        final r = await _supabase
+            .from('sensor_readings')
+            .select('timestamp')
+            .eq('device_id', deviceId)
+            .order('timestamp', ascending: asc)
+            .limit(1)
+            .timeout(kRequestTimeout);
+        return r.isEmpty
+            ? null
+            : DateTime.tryParse('${r.first['timestamp']}')?.toUtc();
+      }
+
+      // Both ends are requested together.
+      final edges = id == null
+          ? const <DateTime?>[null, null]
+          : await Future.wait([edge(id, true), edge(id, false)]);
+      final start = edges[0], end = edges[1];
+      if (!mounted || id != _deviceId) return;
+      // A newer reading than the one shown: the charts are out of date.
+      final newer = _covEnd != null && end != null && end.isAfter(_covEnd!);
+      if (id != null) {
+        markConnection(true);
+        LastData.save('analytics_coverage_$id', [
+          start?.toIso8601String(),
+          end?.toIso8601String(),
+        ]);
+      }
+      setState(() {
+        _covStart = start;
+        _covEnd = end;
+      });
+      if (newer) {
+        _fetchEda(showSpinner: false);
+        _fetchDaily(showSpinner: false);
+        _fetchWeekly(showSpinner: false);
+      }
+    } catch (e) {
+      debugPrint('Coverage fetch error: $e');
+      if (!mounted || id != _deviceId || !isConnectionError(e)) return;
+      // Opened offline: the saved dates also drive "Updated ... ago".
+      if (id != null && _covEnd == null) {
+        final saved = await LastData.read('analytics_coverage_$id');
+        if (!mounted || id != _deviceId) return;
+        if (saved is List && saved.length == 2) {
+          setState(() {
+            _covStart = DateTime.tryParse('${saved[0]}')?.toUtc();
+            _covEnd = DateTime.tryParse('${saved[1]}')?.toUtc();
+          });
+        }
+      }
+      // Runs every 30 s, so this is also what notices a lost connection.
+      markConnection(false, userAction: userAction);
+    }
+  }
+
+  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
+  // clock fields are already local time, so they are rebuilt as a local
+  // DateTime before comparing with now (same as the Plant Profile page).
+  String _updatedText() {
+    final utc = _covEnd; // always stored as UTC
+    if (utc == null) return '';
+    final dt = DateTime(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
+    final diff = DateTime.now().difference(dt);
+
+    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'Updated $m min${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
+    }
+    final d = diff.inDays;
+    return 'Updated $d day${d == 1 ? '' : 's'} ago';
+  }
+
+  // ─────────────────────────── DATA: CORRELATIONS & BREAKDOWN ───────────────────────────
 
   Future<void> _fetchEda({
     bool showSpinner = true,
@@ -379,12 +504,18 @@ class _AiAnalyticsState extends State<AiAnalytics>
     try {
       var corr = <dynamic>[], breakdown = <dynamic>[];
       if (id != null) {
-        corr = await _supabase
-            .rpc('device_correlations', params: {'p_device': id})
-            .timeout(kRequestTimeout) as List;
-        breakdown = await _supabase
-            .rpc('device_target_breakdown', params: {'p_device': id})
-            .timeout(kRequestTimeout) as List;
+        // Both are requested together.
+        final params = {'p_device': id};
+        final results = await Future.wait([
+          _supabase
+              .rpc('device_correlations', params: params)
+              .timeout(kRequestTimeout),
+          _supabase
+              .rpc('device_target_breakdown', params: params)
+              .timeout(kRequestTimeout),
+        ]);
+        corr = results[0] as List;
+        breakdown = results[1] as List;
         LastData.save('analytics_eda_$id', {
           'corr': corr,
           'breakdown': breakdown,
@@ -463,75 +594,61 @@ class _AiAnalyticsState extends State<AiAnalytics>
     });
   }
 
-  // Earliest and latest reading for this device (the overall coverage).
-  Future<void> _fetchCoverage({bool userAction = false}) async {
-    final id = _deviceId;
-    try {
-      Future<DateTime?> edge(bool asc) async {
-        final r = await _supabase
-            .from('sensor_readings')
-            .select('timestamp')
-            .eq('device_id', id!)
-            .order('timestamp', ascending: asc)
-            .limit(1)
-            .timeout(kRequestTimeout);
-        return r.isEmpty
-            ? null
-            : DateTime.tryParse('${r.first['timestamp']}')?.toUtc();
-      }
+  // ─────────────────────────── DATA: DAILY & WEEKLY SERIES ───────────────────────────
 
-      final start = id == null ? null : await edge(true);
-      final end = id == null ? null : await edge(false);
-      if (!mounted || id != _deviceId) return;
-      // A newer reading than the one shown: the charts are out of date.
-      final newer = _covEnd != null && end != null && end.isAfter(_covEnd!);
-      if (id != null) {
-        markConnection(true);
-        LastData.save('analytics_coverage_$id', [
-          start?.toIso8601String(),
-          end?.toIso8601String(),
-        ]);
-      }
-      setState(() {
-        _covStart = start;
-        _covEnd = end;
-      });
-      if (newer) {
-        _fetchEda(showSpinner: false);
-        _fetchDaily(showSpinner: false);
-        _fetchWeekly(showSpinner: false);
-      }
-    } catch (e) {
-      debugPrint('Coverage fetch error: $e');
-      if (!mounted || id != _deviceId || !isConnectionError(e)) return;
-      // Opened offline: the saved dates also drive "Updated ... ago".
-      if (id != null && _covEnd == null) {
-        final saved = await LastData.read('analytics_coverage_$id');
-        if (!mounted || id != _deviceId) return;
-        if (saved is List && saved.length == 2) {
-          setState(() {
-            _covStart = DateTime.tryParse('${saved[0]}')?.toUtc();
-            _covEnd = DateTime.tryParse('${saved[1]}')?.toUtc();
-          });
-        }
-      }
-      // Runs every 30 s, so this is also what notices a lost connection.
-      markConnection(false, userAction: userAction);
-    }
-  }
+  Future<void> _fetchDaily({
+    bool showSpinner = true,
+    bool userAction = false,
+  }) => _fetchSeries(
+    _daily,
+    rpc: 'device_daily_rolling',
+    orderCol: 'day',
+    keep: _dailyKeep,
+    parse: (r) => _DailyPt(
+      DateTime.tryParse('${r['day']}'),
+      _toNum(r['daily_mean']),
+      _toNum(r['rolling_7d_mean']),
+    ),
+    errMsg: 'Could not load daily rolling data.',
+    showSpinner: showSpinner,
+    userAction: userAction,
+  );
+
+  Future<void> _fetchWeekly({
+    bool showSpinner = true,
+    bool userAction = false,
+  }) => _fetchSeries(
+    _weekly,
+    rpc: 'device_weekly_avg',
+    orderCol: 'week_end',
+    keep: _weeklyKeep,
+    parse: (r) {
+      final mean = _toNum(r['weekly_mean']);
+      return mean == null
+          ? null
+          : _WeeklyPt(
+              DateTime.tryParse('${r['week_end']}'),
+              mean,
+              _toNum(r['n_readings'])?.toInt(),
+            );
+    },
+    errMsg: 'Could not load weekly average data.',
+    showSpinner: showSpinner,
+    userAction: userAction,
+  );
 
   /// Fetches the newest [keep] rows of [rpc] for the selected sensor into [s]
   /// (oldest → newest).
   Future<void> _fetchSeries<T extends Object>(
-    _Series<T> s,
-    String rpc,
-    String orderCol,
-    int keep,
-    T? Function(Map<String, dynamic>) parse,
-    String errMsg,
-    bool showSpinner,
-    bool userAction,
-  ) async {
+    _Series<T> s, {
+    required String rpc,
+    required String orderCol,
+    required int keep,
+    required T? Function(Map<String, dynamic>) parse,
+    required String errMsg,
+    required bool showSpinner,
+    required bool userAction,
+  }) async {
     final key = _statKey;
     if (showSpinner) {
       setState(() {
@@ -596,46 +713,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     }
   }
 
-  Future<void> _fetchDaily({
-    bool showSpinner = true,
-    bool userAction = false,
-  }) => _fetchSeries(
-    _daily,
-    'device_daily_rolling',
-    'day',
-    _dailyKeep,
-    (r) => _DailyPt(
-      DateTime.tryParse('${r['day']}'),
-      _toNum(r['daily_mean']),
-      _toNum(r['rolling_7d_mean']),
-    ),
-    'Could not load daily rolling data.',
-    showSpinner,
-    userAction,
-  );
-
-  Future<void> _fetchWeekly({
-    bool showSpinner = true,
-    bool userAction = false,
-  }) => _fetchSeries(
-    _weekly,
-    'device_weekly_avg',
-    'week_end',
-    _weeklyKeep,
-    (r) {
-      final mean = _toNum(r['weekly_mean']);
-      return mean == null
-          ? null
-          : _WeeklyPt(
-              DateTime.tryParse('${r['week_end']}'),
-              mean,
-              _toNum(r['n_readings'])?.toInt(),
-            );
-    },
-    'Could not load weekly average data.',
-    showSpinner,
-    userAction,
-  );
+  // ─────────────────────────── SELECTED SENSOR ───────────────────────────
 
   // Changing the sensor re-drives every card: daily + weekly refetch, while
   // correlations and the health breakdown are filtered from loaded data.
@@ -651,20 +729,6 @@ class _AiAnalyticsState extends State<AiAnalytics>
   }
 
   bool _isSelected(String name) => name.toLowerCase() == _statKey.toLowerCase();
-
-  // All correlation pairs that involve the selected sensor, strongest first.
-  List<_CorrPair> get _sensorCorrelations => [
-    for (final p in _allCorrelations)
-      if (_isSelected(p.a) || _isSelected(p.b)) p,
-  ];
-
-  // Health-breakdown data for the selected sensor (case-insensitive match).
-  Map<String, double>? get _sensorBreakdown {
-    for (final e in _breakdown.entries) {
-      if (_isSelected(e.key)) return e.value;
-    }
-    return null;
-  }
 
   SensorDef get _selectedDef {
     final d = kSensors.firstWhere(
@@ -687,106 +751,96 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
-  // clock fields are already local time, so they are rebuilt as a local
-  // DateTime before comparing with now (same as the Plant Profile page).
-  String _updatedText() {
-    final raw = _covEnd?.toIso8601String();
-    if (raw == null) return '';
-    final utc = DateTime.tryParse(raw.toString())?.toUtc();
-    if (utc == null) return '';
-    final dt = DateTime(
-      utc.year,
-      utc.month,
-      utc.day,
-      utc.hour,
-      utc.minute,
-      utc.second,
-    );
-    final diff = DateTime.now().difference(dt);
+  // All correlation pairs that involve the selected sensor, strongest first.
+  List<_CorrPair> get _sensorCorrelations => [
+    for (final p in _allCorrelations)
+      if (_isSelected(p.a) || _isSelected(p.b)) p,
+  ];
 
-    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
-    if (diff.inMinutes < 60) {
-      final m = diff.inMinutes;
-      return 'Updated $m min${m == 1 ? '' : 's'} ago';
+  // Health-breakdown data for the selected sensor (case-insensitive match).
+  Map<String, double>? get _sensorBreakdown {
+    for (final e in _breakdown.entries) {
+      if (_isSelected(e.key)) return e.value;
     }
-    if (diff.inHours < 24) {
-      final h = diff.inHours;
-      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
-    }
-    final d = diff.inDays;
-    return 'Updated $d day${d == 1 ? '' : 's'} ago';
+    return null;
   }
 
-  // ───────────────────────── SHARED UI ─────────────────────────
+  // ─────────────────────────── PAGE SCROLL ───────────────────────────
 
-  Widget _card({
-    required String title,
-    required String subtitle,
-    required Widget body,
-    double height = 200,
-    List<Widget> footer = const [],
-    String? caption,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      child: AppCard(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: AppText.cardTitle),
-            const SizedBox(height: 2),
-            Text(subtitle, style: AppText.subtitle),
-            const SizedBox(height: 12),
-            SizedBox(height: height, child: body),
-            const SizedBox(height: 6),
-            ...footer,
-            if (caption != null) Text(caption, style: AppText.caption),
-          ],
-        ),
-      ),
+  // Show the "back to top" button only when the user is near the bottom.
+  void _onPageScroll() {
+    if (!_pageScroll.hasClients) return;
+    final p = _pageScroll.position;
+    final near =
+        p.maxScrollExtent > 0 && p.pixels >= p.maxScrollExtent - _showTopWithin;
+    if (near != _showTop) setState(() => _showTop = near);
+  }
+
+  void _scrollToTop() {
+    if (!_pageScroll.hasClients) return;
+    _pageScroll.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
     );
   }
 
-  Widget _emptyBody(String message) => Center(
-    child: Text(message, textAlign: TextAlign.center, style: _mutedStyle),
-  );
+  // ═══════════════════════════ UI (top of screen → bottom) ═══════════════════════════
 
-  Widget _errorBody(String message, VoidCallback onRetry) => Center(
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+  @override
+  Widget build(BuildContext context) {
+    const gap = SizedBox(height: AppSpace.cardGap);
+    final updated = _updatedText();
+    final def = _selectedDef;
+    return Column(
       children: [
-        const Icon(AppIcons.offline, size: 36, color: AppColors.textTertiary),
-        const SizedBox(height: 8),
-        Text(message, textAlign: TextAlign.center, style: _mutedStyle),
-        const SizedBox(height: 10),
-        AppButton(label: 'Retry', icon: AppIcons.refresh, onPressed: onRetry),
+        AppHeader(
+          title: 'Analytics',
+          subtitle: updated.isEmpty ? null : updated,
+        ),
+        // Scrollable body (pull down to refresh) with the floating
+        // back-to-top button drawn above it.
+        Expanded(
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                color: AppColors.green,
+                onRefresh: _refreshAll,
+                child: SingleChildScrollView(
+                  controller: _pageScroll,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(AppSpace.page),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildCoverageBanner(),
+                      gap,
+                      SensorChipSelector(
+                        selectedKey: _statKey,
+                        onChanged: _selectSensor,
+                      ),
+                      gap,
+                      _buildWeeklyCard(def),
+                      gap,
+                      _buildBreakdownCard(def),
+                      gap,
+                      _buildCorrelationCard(def),
+                      gap,
+                      _buildDailyCard(def), // Daily Rolling Average is the last graph
+                      gap,
+                    ],
+                  ),
+                ),
+              ),
+              _buildBackToTop(),
+            ],
+          ),
+        ),
       ],
-    ),
-  );
+    );
+  }
 
-  // Spinner or error body while a chart isn't ready; null when it is.
-  Widget? _notReady(bool loading, String? error, VoidCallback retry) => loading
-      ? const Center(child: CircularProgressIndicator())
-      : error != null
-      ? _errorBody(error, retry)
-      : null;
-
-  Widget _legendDot(Color color, String label) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(width: 10, height: 3, color: color),
-      const SizedBox(width: 4),
-      Text(
-        label,
-        style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
-      ),
-      const SizedBox(width: 12),
-    ],
-  );
-
-  // ───────────────────────── COVERAGE BANNER ─────────────────────────
+  // ── 1. COVERAGE BANNER ──
 
   Widget _buildCoverageBanner() {
     final hasDates = _covStart != null || _covEnd != null;
@@ -804,7 +858,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.18),
+              color: Colors.white.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(AppIcons.timeline, size: 24, color: Colors.white),
@@ -840,149 +894,11 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ───────────────────────── SENSOR SELECTOR ─────────────────────────
+  // ── 2. SENSOR SELECTOR: shared SensorChipSelector (see build) ──
 
-  // Keeps the minimap thumb in sync with the chip row.
-  bool _onChipScroll(Notification n) {
-    final m = n is ScrollNotification
-        ? n.metrics
-        : n is ScrollMetricsNotification
-        ? n.metrics
-        : null;
-    if (m == null || m.viewportDimension <= 0) return false;
-    final total = m.maxScrollExtent + m.viewportDimension;
-    final size = (m.viewportDimension / total).clamp(0.05, 1.0);
-    final start = m.maxScrollExtent <= 0
-        ? 0.0
-        : (m.pixels / m.maxScrollExtent).clamp(0.0, 1.0) * (1 - size);
-    final next = (start, size);
-    // ScrollMetricsNotification can fire mid-layout, where changing a
-    // listened-to value triggers "Build scheduled during frame".
-    final phase = WidgetsBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle ||
-        phase == SchedulerPhase.postFrameCallbacks) {
-      _mini.value = next;
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _mini.value = next;
-      });
-    }
-    return false;
-  }
+  // ── 3. WEEKLY AVERAGE ──
 
-  // Slim track + thumb under the chips. Tap or drag it to move through chips.
-  Widget _buildChipMinimap() {
-    return LayoutBuilder(
-      builder: (context, box) {
-        final w = box.maxWidth;
-        void jump(double dx) {
-          if (!_chipScroll.hasClients) return;
-          final thumbW = w * _mini.value.$2;
-          final frac = w <= thumbW
-              ? 0.0
-              : ((dx - thumbW / 2) / (w - thumbW)).clamp(0.0, 1.0);
-          _chipScroll.jumpTo(frac * _chipScroll.position.maxScrollExtent);
-        }
-
-        Widget bar(double width, Color color) => Container(
-          height: 4,
-          width: width,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        );
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (d) => jump(d.localPosition.dx),
-          onHorizontalDragUpdate: (d) => jump(d.localPosition.dx),
-          child: SizedBox(
-            height: 14,
-            child: Center(
-              child: ValueListenableBuilder<(double, double)>(
-                valueListenable: _mini,
-                builder: (_, v, _) => Stack(
-                  children: [
-                    bar(w, Colors.grey.shade300),
-                    Positioned(
-                      left: v.$1 * w,
-                      child: bar(v.$2 * w, Colors.grey.shade600),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // One sensor picker for the whole page: scrolling filter chips plus a
-  // minimap slider. Tapping a chip centres it; the minimap follows.
-  Widget _buildSensorSelector() {
-    return Column(
-      children: [
-        SizedBox(
-          height: 40,
-          child: NotificationListener<Notification>(
-            onNotification: _onChipScroll,
-            child: ListView.separated(
-              controller: _chipScroll,
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: kSensors.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                final d = kSensors[i];
-                final selected = d.key == _statKey;
-                return FilterChip(
-                  key: _chipKeys[i],
-                  label: Text(
-                    d.label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected ? Colors.white : AppColors.textPrimary,
-                    ),
-                  ),
-                  selected: selected,
-                  showCheckmark: false,
-                  selectedColor: AppColors.green,
-                  backgroundColor: Colors.white,
-                  side: BorderSide(
-                    color: selected ? AppColors.green : AppColors.track,
-                  ),
-                  shape: const StadiumBorder(),
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  onSelected: (_) {
-                    _selectSensor(d.key);
-                    final ctx = _chipKeys[i].currentContext;
-                    if (ctx != null) {
-                      Scrollable.ensureVisible(
-                        ctx,
-                        alignment: 0.5,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeOutCubic,
-                      );
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        _buildChipMinimap(),
-      ],
-    );
-  }
-
-  // ───────────────────────── CARD: Weekly average ─────────────────────────
-
-  Widget _buildWeeklyCard() {
-    final def = _selectedDef;
+  Widget _buildWeeklyCard(SensorDef def) {
     final pts = _weekly.data;
     return _card(
       title: 'Weekly Average',
@@ -991,7 +907,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
           : '${def.label} · weeks ending '
                 '${_fmtRange(pts.first.weekEnd, pts.last.weekEnd)}',
       body: _buildWeeklyChart(def),
-      caption:
+      info:
           'Each bar is one week\'s average, labelled by the week-end date. '
           'Tap a bar to see how many readings it is based on. '
           'Recent weeks may be partial.',
@@ -1000,10 +916,10 @@ class _AiAnalyticsState extends State<AiAnalytics>
 
   Widget _buildWeeklyChart(SensorDef def) {
     if (_notReady(
-      _weekly.loading,
-      _weekly.error,
-      () => _fetchWeekly(userAction: true),
-    )
+          _weekly.loading,
+          _weekly.error,
+          () => _fetchWeekly(userAction: true),
+        )
         case final w?) {
       return w;
     }
@@ -1031,51 +947,46 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ───────────────────────── CARD: Target breakdown ─────────────────────────
+  // ── 4. READINGS BY CROP HEALTH ──
 
-  Widget _buildBreakdownCard() => _card(
+  Widget _buildBreakdownCard(SensorDef def) => _card(
     title: 'Readings by Crop Health',
-    subtitle: '${_selectedDef.label} · average value for each health status',
+    subtitle: '${def.label} · average value for each health status',
     height: 190,
-    body: _buildBreakdownChart(),
-    caption:
+    body: _buildBreakdownChart(def),
+    info:
         'Shows what each sensor typically reads when the crop is in each '
         'status, so you can see which readings go with healthy vs. '
         'stressed conditions.',
   );
 
-  Widget _buildBreakdownChart() {
-    if (_notReady(
-      _edaLoading,
-      _edaError,
-      () => _fetchEda(userAction: true),
-    )
+  Widget _buildBreakdownChart(SensorDef def) {
+    if (_notReady(_edaLoading, _edaError, () => _fetchEda(userAction: true))
         case final w?) {
       return w;
     }
     final data = _sensorBreakdown;
     if (data == null || data.isEmpty) {
-      return _emptyBody(
-        'No ${_selectedDef.label} breakdown data yet for this crop',
-      );
+      return _emptyBody('No ${def.label} breakdown data yet for this crop');
     }
+
+    // Score each status once (used for both the order and the colors).
+    final health = {for (final l in data.keys) l: _scoreForCropHealth(l)};
 
     // Healthiest status first (Optimal → Warning → Critical).
     final labels = data.keys.toList()
       ..sort((a, b) {
-        final c = (_scoreForCropHealth(b) ?? -1).compareTo(
-          _scoreForCropHealth(a) ?? -1,
-        );
+        final c = (health[b] ?? -1).compareTo(health[a] ?? -1);
         return c != 0 ? c : a.compareTo(b);
       });
-    final maxVal = labels.map((l) => data[l]!).reduce((a, b) => a > b ? a : b);
+    final maxVal = data.values.reduce((a, b) => a > b ? a : b);
     final maxY = maxVal <= 0 ? 1.0 : maxVal * 1.2;
 
     return _barChart(
       maxY: maxY,
       interval: maxY / 4,
       values: [for (final l in labels) data[l]!],
-      colors: [for (final l in labels) _colorForCropHealth(l)],
+      colors: [for (final l in labels) _colorForHealthScore(health[l])],
       barWidth: 28,
       leftSize: 40,
       leftLabel: (v) => v.toStringAsFixed(v.abs() >= 100 ? 0 : 1),
@@ -1085,12 +996,12 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ───────────────────────── CARD: Correlations ─────────────────────────
+  // ── 5. SENSOR CORRELATIONS ──
 
-  Widget _buildCorrelationCard() => _card(
+  Widget _buildCorrelationCard(SensorDef def) => _card(
     title: 'Sensor Correlations',
-    subtitle: '${_selectedDef.label} compared with the other sensors',
-    body: _buildCorrelationChart(),
+    subtitle: '${def.label} compared with the other sensors',
+    body: _buildCorrelationChart(def),
     footer: [
       Row(
         children: [
@@ -1100,25 +1011,21 @@ class _AiAnalyticsState extends State<AiAnalytics>
       ),
       const SizedBox(height: 4),
     ],
-    caption:
+    info:
         'Every pair involving this sensor, strongest first. Values near ±1 '
         'mean a strong relationship; near 0 means little or none. '
         'Tap a bar for details.',
   );
 
-  Widget _buildCorrelationChart() {
-    if (_notReady(
-      _edaLoading,
-      _edaError,
-      () => _fetchEda(userAction: true),
-    )
+  Widget _buildCorrelationChart(SensorDef def) {
+    if (_notReady(_edaLoading, _edaError, () => _fetchEda(userAction: true))
         case final w?) {
       return w;
     }
     final corr = _sensorCorrelations;
     if (corr.isEmpty) {
       return _emptyBody(
-        'No correlation data yet for ${_selectedDef.label} on this crop.',
+        'No correlation data yet for ${def.label} on this crop.',
       );
     }
     return _barChart(
@@ -1141,10 +1048,9 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ───────────────────── CARD: Daily rolling average ─────────────────────
+  // ── 6. DAILY ROLLING AVERAGE ──
 
-  Widget _buildDailyCard() {
-    final def = _selectedDef;
+  Widget _buildDailyCard(SensorDef def) {
     final pts = _daily.data;
     return _card(
       title: 'Daily Rolling Average',
@@ -1158,14 +1064,14 @@ class _AiAnalyticsState extends State<AiAnalytics>
             _legendDot(AppColors.healthy, '7-day rolling mean'),
             _legendDot(AppColors.info, 'Daily mean'),
             _legendDot(
-              AppColors.optimal.withOpacity(0.35),
+              AppColors.optimal.withValues(alpha: 0.35),
               'Optimal: ${def.optimalText}',
             ),
           ],
         ),
         const SizedBox(height: 2),
       ],
-      caption:
+      info:
           'The rolling mean smooths out day-to-day noise so you can see '
           'whether a sensor is drifting. The green band appears only '
           'when the optimal range overlaps the data.',
@@ -1174,10 +1080,10 @@ class _AiAnalyticsState extends State<AiAnalytics>
 
   Widget _buildDailyChart(SensorDef def) {
     if (_notReady(
-      _daily.loading,
-      _daily.error,
-      () => _fetchDaily(userAction: true),
-    )
+          _daily.loading,
+          _daily.error,
+          () => _fetchDaily(userAction: true),
+        )
         case final w?) {
       return w;
     }
@@ -1205,7 +1111,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
 
     List<FlSpot> spots(double? Function(_DailyPt) pick) => [
       for (int i = 0; i < pts.length; i++)
-        if (pick(pts[i]) != null) FlSpot(i.toDouble(), pick(pts[i])!),
+        if (pick(pts[i]) case final v?) FlSpot(i.toDouble(), v),
     ];
 
     return LineChart(
@@ -1223,7 +1129,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
                   HorizontalRangeAnnotation(
                     y1: def.min < minY ? minY : def.min,
                     y2: def.max > maxY ? maxY : def.max,
-                    color: AppColors.optimal.withOpacity(0.15),
+                    color: AppColors.optimal.withValues(alpha: 0.15),
                   ),
                 ]
               : const [],
@@ -1265,7 +1171,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
           // Daily mean (thin, behind)
           LineChartBarData(
             spots: spots((p) => p.daily),
-            color: AppColors.info.withOpacity(0.7),
+            color: AppColors.info.withValues(alpha: 0.7),
             barWidth: 1.5,
             dotData: const FlDotData(show: true),
           ),
@@ -1279,7 +1185,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
             dotData: const FlDotData(show: false),
             belowBarData: BarAreaData(
               show: true,
-              color: AppColors.healthy.withOpacity(0.10),
+              color: AppColors.healthy.withValues(alpha: 0.10),
             ),
           ),
         ],
@@ -1287,25 +1193,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ───────────────────────── BACK TO TOP ─────────────────────────
-
-  // Show the button only when the user is near the bottom of the page.
-  void _onPageScroll() {
-    if (!_pageScroll.hasClients) return;
-    final p = _pageScroll.position;
-    final near =
-        p.maxScrollExtent > 0 && p.pixels >= p.maxScrollExtent - _showTopWithin;
-    if (near != _showTop) setState(() => _showTop = near);
-  }
-
-  void _scrollToTop() {
-    if (!_pageScroll.hasClients) return;
-    _pageScroll.animateTo(
-      0,
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutCubic,
-    );
-  }
+  // ── 7. BACK TO TOP (floats above the page) ──
 
   Widget _buildBackToTop() {
     return Positioned(
@@ -1354,54 +1242,180 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ───────────────────────── PAGE ─────────────────────────
+  // ── CARD BUILDING BLOCKS (used by every chart card above) ──
 
-  @override
-  Widget build(BuildContext context) {
-    const gap = SizedBox(height: AppSpace.cardGap);
-    final updated = _updatedText();
-    return Column(
-      children: [
-        AppHeader(
-          title: 'AI Analytics',
-          subtitle: updated.isEmpty ? null : updated,
-        ),
-        // Scrollable body (pull down to refresh) with the floating
-        // back-to-top button drawn above it.
-        Expanded(
-          child: Stack(
-            children: [
-              RefreshIndicator(
-                color: AppColors.green,
-                onRefresh: _refreshAll,
-                child: SingleChildScrollView(
-                  controller: _pageScroll,
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(AppSpace.page),
+  /// A chart card. [info] is the explanation of what the chart shows; it is
+  /// not printed on the card but shown while the (i) button at the top right
+  /// is held.
+  Widget _card({
+    required String title,
+    required String subtitle,
+    required Widget body,
+    double height = 200,
+    List<Widget> footer = const [],
+    String? info,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: AppCard(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildCoverageBanner(),
-                      gap,
-                      _buildSensorSelector(),
-                      gap,
-                      _buildWeeklyCard(),
-                      gap,
-                      _buildBreakdownCard(),
-                      gap,
-                      _buildCorrelationCard(),
-                      gap,
-                      _buildDailyCard(), // Daily Rolling Average is the last graph
-                      gap,
+                      Text(title, style: AppText.cardTitle),
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: AppText.subtitle),
                     ],
                   ),
                 ),
+                if (info != null) ...[
+                  const SizedBox(width: 8),
+                  _InfoButton(message: info),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(height: height, child: body),
+            const SizedBox(height: 6),
+            ...footer,
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Spinner or error body while a chart isn't ready; null when it is.
+  Widget? _notReady(bool loading, String? error, VoidCallback retry) => loading
+      ? const Center(child: CircularProgressIndicator())
+      : error != null
+      ? _errorBody(error, retry)
+      : null;
+
+  Widget _errorBody(String message, VoidCallback onRetry) => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(AppIcons.offline, size: 36, color: AppColors.textTertiary),
+        const SizedBox(height: 8),
+        Text(message, textAlign: TextAlign.center, style: _mutedStyle),
+        const SizedBox(height: 10),
+        AppButton(label: 'Retry', icon: AppIcons.refresh, onPressed: onRetry),
+      ],
+    ),
+  );
+
+  Widget _emptyBody(String message) => Center(
+    child: Text(message, textAlign: TextAlign.center, style: _mutedStyle),
+  );
+
+  Widget _legendDot(Color color, String label) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(width: 10, height: 3, color: color),
+      const SizedBox(width: 4),
+      Text(
+        label,
+        style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+      ),
+      const SizedBox(width: 12),
+    ],
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// 6. INFO BUTTON — small (i) for the top-right of a chart card. Press and
+//    hold it to show [message] in a bubble under the icon; the bubble
+//    disappears as soon as the finger is lifted.
+// ═════════════════════════════════════════════════════════════════════════
+
+class _InfoButton extends StatefulWidget {
+  final String message;
+  const _InfoButton({required this.message});
+
+  @override
+  State<_InfoButton> createState() => _InfoButtonState();
+}
+
+class _InfoButtonState extends State<_InfoButton> {
+  final _link = LayerLink(); // anchors the bubble to the icon
+  OverlayEntry? _entry;
+
+  @override
+  void dispose() {
+    _hide();
+    super.dispose();
+  }
+
+  void _show() {
+    if (_entry != null) return;
+    final width = MediaQuery.of(context).size.width;
+    _entry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 0,
+        top: 0,
+        child: CompositedTransformFollower(
+          link: _link,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.bottomRight,
+          followerAnchor: Alignment.topRight,
+          offset: const Offset(0, 6),
+          child: IgnorePointer(
+            child: Material(
+              color: Colors.transparent,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: width - 80),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.textPrimary,
+                    borderRadius: BorderRadius.circular(AppRadius.field),
+                    boxShadow: AppShadows.card,
+                  ),
+                  child: Text(
+                    widget.message,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
               ),
-              _buildBackToTop(),
-            ],
+            ),
           ),
         ),
-      ],
+      ),
+    );
+    Overlay.of(context).insert(_entry!);
+  }
+
+  void _hide() {
+    _entry?.remove();
+    _entry = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompositedTransformTarget(
+      link: _link,
+      // Raw pointer events: shows while the finger is down, hides on release.
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) => _show(),
+        onPointerUp: (_) => _hide(),
+        onPointerCancel: (_) => _hide(),
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(AppIcons.info, size: 20, color: AppColors.textPrimary),
+        ),
+      ),
     );
   }
 }

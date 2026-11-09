@@ -53,7 +53,7 @@ class WelcomeScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: AppLandingButton(
-                      label: 'Sign In',
+                      label: 'Sign Up',
                       onPressed: () => Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => const GetStarted()),
@@ -63,7 +63,7 @@ class WelcomeScreen extends StatelessWidget {
                   const SizedBox(width: 15),
                   Expanded(
                     child: AppLandingButton(
-                      label: 'Get Started',
+                      label: 'Sign In',
                       primary: false,
                       onPressed: () => Navigator.push(
                         context,

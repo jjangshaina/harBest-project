@@ -79,9 +79,11 @@ class CropService extends ChangeNotifier {
       final rows = await _db
           .from('crops')
           .select()
+          .eq('owner_uid', uid)
           .eq('status', 'active')
           .order('created_at', ascending: true)
           .timeout(kRequestTimeout);
+          
       await _apply(rows as List);
       final wasOffline = offline;
       offline = false;

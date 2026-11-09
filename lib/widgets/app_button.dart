@@ -293,7 +293,7 @@ class AuthPrimaryButton extends StatelessWidget {
   }
 }
 
-/// "Already have an account? Sign in" style footer.
+/// "Already have an account? Sign up" style footer.
 class AuthFooterLink extends StatelessWidget {
   final String prompt;
   final String linkText;
