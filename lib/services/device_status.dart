@@ -66,6 +66,9 @@ class DeviceStatus {
   final String? ipAddress;
   final int? uptimeSeconds;
   final double? cpuTemp;
+  final double? batteryPct; // 0-100, null = no battery board / not read
+  final double? batteryVoltage; // 3S pack volts (9.9 empty - 12.6 full)
+  final bool? batteryCharging; // true charging, false on battery, null idle
 
   const DeviceStatus({
     required this.deviceId,
@@ -78,6 +81,9 @@ class DeviceStatus {
     this.ipAddress,
     this.uptimeSeconds,
     this.cpuTemp,
+    this.batteryPct,
+    this.batteryVoltage,
+    this.batteryCharging,
   });
 
   factory DeviceStatus.fromMap(Map<String, dynamic> m) {
@@ -97,7 +103,57 @@ class DeviceStatus {
       ipAddress: m['ip_address'] as String?,
       uptimeSeconds: asInt(m['uptime_s']),
       cpuTemp: asDouble(m['cpu_temp']),
+      batteryPct: asDouble(m['battery_pct']),
+      batteryVoltage: asDouble(m['battery_voltage']),
+      batteryCharging: asBool(m['battery_charging']),
     );
+  }
+
+  // --- Battery ---------------------------------------------------------
+
+  bool get hasBattery => batteryPct != null;
+
+  /// Matches BATTERY_LOW_PCT in harbest2.0.py.
+  static const double lowBatteryPct = 20;
+
+  bool get isBatteryLow => hasBattery && batteryPct! <= lowBatteryPct;
+
+  /// "73%" or "--".
+  String get batteryLabel =>
+      hasBattery ? '${batteryPct!.round()}%' : '--';
+
+  /// "11.83 V · On battery" for a tooltip / detail line.
+  String get batteryDetail {
+    if (!hasBattery) return 'No battery data';
+    final state = switch (batteryCharging) {
+      true => 'Charging',
+      false => 'On battery',
+      null => 'Idle',
+    };
+    return [
+      if (batteryVoltage != null) '${batteryVoltage!.toStringAsFixed(2)} V',
+      state,
+    ].join(' · ');
+  }
+
+  Color get batteryColor {
+    if (!hasBattery) return AppColors.textTertiary;
+    if (isBatteryLow) return AppColors.critical;
+    if (batteryPct! <= 50) return AppColors.caution;
+    return AppColors.optimal;
+  }
+
+  IconData get batteryIcon {
+    if (!hasBattery) return Icons.battery_unknown;
+    if (batteryCharging == true) return Icons.battery_charging_full;
+    final p = batteryPct!;
+    if (p <= lowBatteryPct) return Icons.battery_alert;
+    if (p >= 95) return Icons.battery_full;
+    if (p >= 80) return Icons.battery_6_bar;
+    if (p >= 65) return Icons.battery_5_bar;
+    if (p >= 50) return Icons.battery_4_bar;
+    if (p >= 35) return Icons.battery_3_bar;
+    return Icons.battery_2_bar;
   }
 
   /// "Excellent" / "Good" / "Fair" / "Weak" from the dBm value.
@@ -108,6 +164,54 @@ class DeviceStatus {
     if (r >= -60) return 'Good';
     if (r >= -70) return 'Fair';
     return 'Weak';
+  }
+}
+
+/// Compact battery readout (icon + "73%") to sit inside the device status
+/// card, e.g. next to the Online badge. Tap it to see voltage and state.
+/// Greyed out when the device isn't online, because the value is then
+/// only the last known reading.
+///
+///   BatteryBadge(status: status, connection: connectionFor(status.lastSeen))
+class BatteryBadge extends StatelessWidget {
+  final DeviceStatus status;
+  final DeviceConnection connection;
+
+  const BatteryBadge({
+    super.key,
+    required this.status,
+    required this.connection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final live = connection == DeviceConnection.online;
+    final color = live ? status.batteryColor : AppColors.textTertiary;
+    final tip = live
+        ? status.batteryDetail
+        : 'Last known: ${status.batteryLabel} · ${status.batteryDetail}';
+
+    return Tooltip(
+      message: tip,
+      triggerMode: TooltipTriggerMode.tap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          RotatedBox(
+            quarterTurns: 1, // horizontal battery: same height as the text
+            child: Icon(status.batteryIcon, size: 18, color: color),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            status.batteryLabel,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
