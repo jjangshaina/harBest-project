@@ -11,6 +11,7 @@ import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
+import 'package:flutter_application_harbest_1/plant_profile/ai_recommendation_card.dart';
 import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
@@ -554,7 +555,8 @@ class _PlantProfilePageState extends State<PlantProfilePage>
           .timeout(kRequestTimeout);
 
       // Ignore the result if the user switched crop while this was loading.
-      if (!mounted || CropService.instance.selected?.deviceId != crop.deviceId) {
+      if (!mounted ||
+          CropService.instance.selected?.deviceId != crop.deviceId) {
         return;
       }
 
@@ -673,7 +675,8 @@ class _PlantProfilePageState extends State<PlantProfilePage>
       (jsonDecode(raw) as Map<String, dynamic>).forEach((key, value) {
         final m = value as Map<String, dynamic>;
         final until = DateTime.fromMillisecondsSinceEpoch(m['until'] as int);
-        if (until.isAfter(now)) _hidden[key] = _Hidden(until, m['level'] as int);
+        if (until.isAfter(now))
+          _hidden[key] = _Hidden(until, m['level'] as int);
       });
     } catch (_) {
       // Unreadable saved state: start fresh.
@@ -936,46 +939,51 @@ class _PlantProfilePageState extends State<PlantProfilePage>
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : showEmpty
-                      // Pullable too, so a failed start-up can be retried.
-                      ? AppRefreshable(
-                          onRefresh: () => _fetchAll(silent: false),
-                          child: CropService.instance.offline
-                              ? const AppOfflineState()
-                              : const AppNoCropState(),
-                        )
-                      : RefreshIndicator(
-                          color: AppColors.green,
-                          onRefresh: () => _fetchAll(silent: false),
-                          child: SingleChildScrollView(
-                            key: _scrollKey,
-                            controller: _scroll,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            // Extra bottom space so the floating buttons never
-                            // cover the last card.
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpace.page,
-                              AppSpace.gap,
-                              AppSpace.page,
-                              96,
-                            ),
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              fit: StackFit.passthrough,
+                  // Pullable too, so a failed start-up can be retried.
+                  ? AppRefreshable(
+                      onRefresh: () => _fetchAll(silent: false),
+                      child: CropService.instance.offline
+                          ? const AppOfflineState()
+                          : const AppNoCropState(),
+                    )
+                  : RefreshIndicator(
+                      color: AppColors.green,
+                      onRefresh: () => _fetchAll(silent: false),
+                      child: SingleChildScrollView(
+                        key: _scrollKey,
+                        controller: _scroll,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        // Extra bottom space so the floating buttons never
+                        // cover the last card.
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpace.page,
+                          AppSpace.gap,
+                          AppSpace.page,
+                          96,
+                        ),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          fit: StackFit.passthrough,
+                          children: [
+                            Column(
                               children: [
-                                Column(
-                                  children: [
-                                    _buildCropImageCard(days),
-                                    _buildGrowthTimelineCard(days),
-                                    _buildInsightsCard(open),
-                                    _buildRecommendations(open),
-                                  ],
+                                _buildCropImageCard(days),
+                                _buildGrowthTimelineCard(days),
+                                AiRecommendationCard(
+                                  deviceId:
+                                      CropService.instance.selected?.deviceId ??
+                                      'harbest_pi_zero_w',
                                 ),
-                                // Last child = drawn on top of the cards.
-                                _buildStageDetailsOverlay(days),
+                                _buildInsightsCard(open),
+                                _buildRecommendations(open),
                               ],
                             ),
-                          ),
+                            // Last child = drawn on top of the cards.
+                            _buildStageDetailsOverlay(days),
+                          ],
                         ),
+                      ),
+                    ),
             ),
           ],
         ),
@@ -1388,7 +1396,11 @@ class _PlantProfilePageState extends State<PlantProfilePage>
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(AppIcons.tip, size: 13, color: AppColors.textSecondary),
+              const Icon(
+                AppIcons.tip,
+                size: 13,
+                color: AppColors.textSecondary,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
