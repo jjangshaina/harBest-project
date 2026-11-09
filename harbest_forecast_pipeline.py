@@ -413,15 +413,37 @@ def main():
         print("saved forecast_preview.png")
 
     if a.push:
-        import requests
-        url, key = os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"]
-        hdr = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json",
-               "Prefer": "return=representation"}
-        r = requests.post(f"{url}/rest/v1/forecast_runs", headers=hdr, json=dict(
-            device_id=DEVICE_ID, made_at=now.isoformat(), status=cfg["status"], summary=payload))
-        r.raise_for_status(); run_id = r.json()[0]["id"]
-        r2 = requests.post(f"{url}/rest/v1/forecasts", headers=hdr, json=[dict(x, run_id=run_id) for x in flat])
-        r2.raise_for_status(); print(f"pushed run {run_id} to Supabase")
+        push_to_supabase(payload, flat, cfg, now)
+
+
+def push_to_supabase(payload, flat, cfg, now):
+    import sys, requests
+    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+    if not url or not key:
+        sys.exit("ERROR: SUPABASE_URL / SUPABASE_KEY secrets are missing.")
+    hdr = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json",
+           "Prefer": "return=representation"}
+    # NaN is not valid JSON -> convert to null
+    body = json.loads(json.dumps(dict(device_id=DEVICE_ID, made_at=now.isoformat(),
+                                      status=cfg["status"], summary=payload), default=str)
+                      .replace("NaN", "null"))
+    r = requests.post(f"{url}/rest/v1/forecast_runs", headers=hdr, json=body, timeout=60)
+    if r.status_code == 404:
+        sys.exit("ERROR: table 'forecast_runs' does not exist. Run supabase/forecasts.sql in the SQL Editor.")
+    if r.status_code in (401, 403):
+        sys.exit(f"ERROR: Supabase refused the insert ({r.status_code}). Use the service_role key. {r.text[:200]}")
+    if not r.ok:
+        sys.exit(f"ERROR: forecast_runs insert failed {r.status_code}: {r.text[:300]}")
+    run_id = r.json()[0]["id"]
+    print(f"pushed run {run_id} to forecast_runs (this is what the app reads)")
+
+    rows = json.loads(json.dumps([dict(x, run_id=run_id) for x in flat]).replace("NaN", "null"))
+    r2 = requests.post(f"{url}/rest/v1/forecasts", headers=hdr, json=rows, timeout=60)
+    if r2.ok:
+        print(f"pushed {len(rows)} rows to forecasts")
+    else:  # optional table - don't fail the whole run for it
+        print(f"WARNING: forecasts insert skipped ({r2.status_code}): {r2.text[:200]}")
 
 if __name__ == "__main__":
     main()
