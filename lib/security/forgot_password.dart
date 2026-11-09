@@ -108,7 +108,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
         children: [
           AuthField(
             label: 'Email address',
-            hint: 'name@example.com',
+            hint: 'name@gmail.com',
             icon: AppIcons.mail,
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,

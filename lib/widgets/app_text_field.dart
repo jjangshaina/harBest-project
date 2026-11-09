@@ -146,23 +146,43 @@ class AppPasswordField extends StatelessWidget {
   }
 }
 
-/// Text field for normal (light) pages, with a floating label and optional
-/// validator for use inside a [Form]. Pass [onToggleObscure] to get the
-/// show / hide eye button (password fields).
+/// Text field for normal (light) pages, with a validator for use inside a
+/// [Form]. The [label] always stays at the top of the box (it does not wait
+/// for a tap) and the optional [hint] placeholder sits inside the field
+/// under it. Pass [onToggleObscure] to get the show / hide eye button
+/// (password fields).
 class AppFormField extends StatelessWidget {
   final String label;
+
+  /// Placeholder shown inside the field while it is empty.
+  final String? hintText;
   final TextEditingController controller;
   final bool obscure;
   final VoidCallback? onToggleObscure;
   final String? Function(String?)? validator;
 
+  /// Error shown under the field from outside (e.g. a server-side check).
+  final String? errorText;
+
+  /// Small message under the field when there is no error (e.g. "Passwords match.").
+  final String? helperText;
+  final Color helperColor;
+  final FocusNode? focusNode;
+  final ValueChanged<String>? onChanged;
+
   const AppFormField({
     super.key,
     required this.label,
+    this.hintText,
     required this.controller,
     this.obscure = false,
     this.onToggleObscure,
     this.validator,
+    this.errorText,
+    this.helperText,
+    this.helperColor = AppColors.optimal,
+    this.focusNode,
+    this.onChanged,
   });
 
   @override
@@ -176,17 +196,46 @@ class AppFormField extends StatelessWidget {
       controller: controller,
       obscureText: obscure,
       validator: validator,
+      focusNode: focusNode,
+      onChanged: onChanged,
       style: AppText.body,
       decoration: InputDecoration(
         labelText: label,
         labelStyle: AppText.label.copyWith(fontSize: 15),
+        // Label stays at the top of the field, tapped or not.
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        floatingLabelStyle: AppText.label.copyWith(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: AppColors.darkGreen,
+        ),
+        // Placeholder sits inside the field, under the label.
+        hintText: hintText,
+        errorText: errorText,
+        helperText: helperText,
+        helperMaxLines: 2,
+        helperStyle: TextStyle(
+          color: helperColor,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+        hintStyle: AppText.body.copyWith(color: AppColors.textTertiary),
         filled: true,
         fillColor: AppColors.fieldLight,
         border: noLine,
         enabledBorder: noLine,
         focusedBorder: noLine,
-        errorBorder: noLine,
-        focusedErrorBorder: noLine,
+        // Red outline + message under the field when there is an error.
+        errorStyle: const TextStyle(color: AppColors.critical, fontSize: 12),
+        errorMaxLines: 3, // long messages wrap instead of being cut off
+        errorBorder: OutlineInputBorder(
+          borderRadius: radius,
+          borderSide: const BorderSide(color: AppColors.critical, width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: radius,
+          borderSide: const BorderSide(color: AppColors.critical, width: 2),
+        ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         suffixIcon: onToggleObscure == null
             ? null

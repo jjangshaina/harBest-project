@@ -1,7 +1,38 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart'
+    show kRequestTimeout, isConnectionError, ConnectionWatcher;
+
+/// The last data each page loaded, saved on the phone. When there is no
+/// internet the pages show it instead, also after the app was closed and
+/// opened again offline.
+class LastData {
+  LastData._();
+
+  static Future<void> save(String key, Object? value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('last_data_$key', jsonEncode(value));
+    } catch (e) {
+      debugPrint('LastData.save($key) error: $e');
+    }
+  }
+
+  static Future<dynamic> read(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('last_data_$key');
+      return raw == null ? null : jsonDecode(raw);
+    } catch (e) {
+      debugPrint('LastData.read($key) error: $e');
+      return null;
+    }
+  }
+}
 
 class Crop {
   final String id, deviceId, ownerUid, name, cropType;
@@ -33,6 +64,11 @@ class CropService extends ChangeNotifier {
   Crop? selected;
   bool loaded = false;
 
+  /// True when the last [load] could not reach the server. The crops from
+  /// before (if any) are kept, so the pages can keep showing the last data
+  /// instead of "No crop yet".
+  bool offline = false;
+
   Future<void> load() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
@@ -43,25 +79,54 @@ class CropService extends ChangeNotifier {
       final rows = await _db
           .from('crops')
           .select()
+          .eq('owner_uid', uid)
           .eq('status', 'active')
-          .order('created_at', ascending: true);
-      crops = (rows as List)
-          .map((r) => Crop.fromMap(Map<String, dynamic>.from(r)))
-          .toList();
-
-      final prefs = await SharedPreferences.getInstance();
-      final wantedId = selected?.id ?? prefs.getString(_prefKey);
-      selected = crops.isEmpty
-          ? null
-          : crops.firstWhere((c) => c.id == wantedId,
-              orElse: () => crops.first);
+          .order('created_at', ascending: true)
+          .timeout(kRequestTimeout);
+          
+      await _apply(rows as List);
+      final wasOffline = offline;
+      offline = false;
+      LastData.save('crops_$uid', rows);
+      if (wasOffline) ConnectionWatcher.instance.reportOnline();
     } catch (e) {
       debugPrint('CropService.load error: $e');
-      crops = [];
-      selected = null;
+      if (isConnectionError(e)) {
+        // Keep what we had. Opened offline with nothing yet: use the crop
+        // list saved on the phone, so the pages can show their last data.
+        // (The pages confirm whether the internet is really gone before
+        // telling the user.)
+        offline = true;
+        if (crops.isEmpty) {
+          final saved = await LastData.read('crops_$uid');
+          if (saved is List) {
+            try {
+              await _apply(saved);
+            } catch (e) {
+              debugPrint('Saved crop list unreadable: $e');
+            }
+          }
+        }
+      } else {
+        offline = false;
+        crops = [];
+        selected = null;
+      }
     }
     loaded = true;
     notifyListeners();
+  }
+
+  Future<void> _apply(List rows) async {
+    crops = rows
+        .map((r) => Crop.fromMap(Map<String, dynamic>.from(r as Map)))
+        .toList();
+    final prefs = await SharedPreferences.getInstance();
+    final wantedId = selected?.id ?? prefs.getString(_prefKey);
+    selected = crops.isEmpty
+        ? null
+        : crops.firstWhere((c) => c.id == wantedId,
+            orElse: () => crops.first);
   }
 
   void select(Crop c) {
@@ -76,6 +141,7 @@ class CropService extends ChangeNotifier {
     crops = [];
     selected = null;
     loaded = false;
+    offline = false;
     notifyListeners();
   }
 }

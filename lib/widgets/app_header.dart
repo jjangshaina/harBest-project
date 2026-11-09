@@ -109,7 +109,7 @@ class AppHeader extends StatelessWidget {
                     errorBuilder: (_, _, _) =>
                         const ColoredBox(color: AppColors.green),
                   ),
-                  ColoredBox(color: AppColors.green.withOpacity(0.55)),
+                  ColoredBox(color: AppColors.green.withValues(alpha: 0.55)),
                 ],
               ),
             ),

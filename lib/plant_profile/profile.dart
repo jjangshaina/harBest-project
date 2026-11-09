@@ -1,19 +1,28 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
+
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-import 'package:flutter_application_harbest_1/widgets/app_button.dart';
-import 'package:flutter_application_harbest_1/widgets/app_card.dart';
-import 'package:flutter_application_harbest_1/plant_profile/insight_rules.dart';
-import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
-import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
+
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
+
+import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
+import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
+import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
+import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
+
+import 'package:flutter_application_harbest_1/plant_profile/insight_rules.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show normalizeReading;
+
+// ═════════════════════════════════════════════════════════════════════════
+// 1. GROWTH STAGES (also used by harvest_service.dart)
+// ═════════════════════════════════════════════════════════════════════════
 
 /// Represents one stage in the plant's growth cycle.
 /// [name] is the short label under each step; [title] is the descriptive
@@ -65,64 +74,23 @@ const List<GrowthStage> kGrowthStages = [
   ),
 ];
 
+// ═════════════════════════════════════════════════════════════════════════
+// 2. OPTIMAL CONDITIONS PER STAGE
+// ═════════════════════════════════════════════════════════════════════════
+
 /// Three-band range used to classify a raw sensor value against what's
 /// ideal for mustard greens.
-class _RangeSpec {
+class RangeSpec {
   final double optimalMin;
   final double optimalMax;
   final double acceptableMin;
   final double acceptableMax;
 
-  const _RangeSpec({
+  const RangeSpec({
     required this.optimalMin,
     required this.optimalMax,
     required this.acceptableMin,
     required this.acceptableMax,
-  });
-}
-
-enum _FactorStatus { optimal, caution, critical, unknown }
-
-extension on _FactorStatus {
-  Color get color {
-    switch (this) {
-      case _FactorStatus.optimal:
-        return AppColors.optimal;
-      case _FactorStatus.caution:
-        return AppColors.caution;
-      case _FactorStatus.critical:
-        return AppColors.critical;
-      case _FactorStatus.unknown:
-        return AppColors.textTertiary;
-    }
-  }
-
-  String get label {
-    switch (this) {
-      case _FactorStatus.optimal:
-        return 'Optimal';
-      case _FactorStatus.caution:
-        return 'Caution';
-      case _FactorStatus.critical:
-        return 'Critical';
-      case _FactorStatus.unknown:
-        return 'No data';
-    }
-  }
-}
-
-/// One row in the "Growth conditions" breakdown.
-class _ConditionFactor {
-  final String name;
-  final String displayValue;
-  final _FactorStatus status;
-  final IconData? icon;
-
-  const _ConditionFactor({
-    required this.name,
-    required this.displayValue,
-    required this.status,
-    this.icon,
   });
 }
 
@@ -135,12 +103,12 @@ class _ConditionFactor {
 ///
 /// [ec] is in mS/cm (the same unit the dashboard shows).
 class StageConditions {
-  final _RangeSpec pH;
-  final _RangeSpec soilMoisture;
-  final _RangeSpec temperature;
-  final _RangeSpec humidity;
-  final _RangeSpec heatIndex;
-  final _RangeSpec ec;
+  final RangeSpec pH;
+  final RangeSpec soilMoisture;
+  final RangeSpec temperature;
+  final RangeSpec humidity;
+  final RangeSpec heatIndex;
+  final RangeSpec ec;
   final String npkGuidance;
 
   const StageConditions({
@@ -154,39 +122,40 @@ class StageConditions {
   });
 }
 
-final Map<String, StageConditions> kStageConditions = {
-  'Germination': const StageConditions(
-    pH: _RangeSpec(
+/// One entry per stage in [kGrowthStages], keyed by [GrowthStage.name].
+const Map<String, StageConditions> kStageConditions = {
+  'Germination': StageConditions(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 65,
       optimalMax: 80,
       acceptableMin: 55,
       acceptableMax: 85,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 20,
       optimalMax: 25,
       acceptableMin: 15,
       acceptableMax: 27,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 60,
       optimalMax: 80,
       acceptableMin: 50,
       acceptableMax: 90,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 20,
       optimalMax: 25,
       acceptableMin: 15,
       acceptableMax: 27,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 0.8,
       optimalMax: 1.5,
       acceptableMin: 0.5,
@@ -195,38 +164,38 @@ final Map<String, StageConditions> kStageConditions = {
     npkGuidance:
         'Minimal feeding needed — the seed itself supplies early nutrients.',
   ),
-  'Seedling': const StageConditions(
-    pH: _RangeSpec(
+  'Seedling': StageConditions(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 55,
       optimalMax: 70,
       acceptableMin: 45,
       acceptableMax: 75,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 18,
       optimalMax: 22,
       acceptableMin: 12,
       acceptableMax: 26,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 55,
       optimalMax: 75,
       acceptableMin: 45,
       acceptableMax: 85,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 18,
       optimalMax: 22,
       acceptableMin: 12,
       acceptableMax: 26,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.0,
       optimalMax: 1.8,
       acceptableMin: 0.7,
@@ -234,38 +203,38 @@ final Map<String, StageConditions> kStageConditions = {
     ),
     npkGuidance: 'Begin light nitrogen feeding to support early leaf growth.',
   ),
-  'Vegetative': const StageConditions(
-    pH: _RangeSpec(
+  'Vegetative': StageConditions(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 40,
       optimalMax: 60,
       acceptableMin: 30,
       acceptableMax: 70,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 25,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 50,
       optimalMax: 70,
       acceptableMin: 40,
       acceptableMax: 80,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 27,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.2,
       optimalMax: 2.4,
       acceptableMin: 0.8,
@@ -274,38 +243,38 @@ final Map<String, StageConditions> kStageConditions = {
     npkGuidance:
         'Highest nitrogen demand of the whole cycle — this drives leaf growth.',
   ),
-  'Harvesting': const StageConditions(
-    pH: _RangeSpec(
+  'Harvesting': StageConditions(
+    pH: RangeSpec(
       optimalMin: 6.0,
       optimalMax: 7.0,
       acceptableMin: 5.5,
       acceptableMax: 7.5,
     ),
-    soilMoisture: _RangeSpec(
+    soilMoisture: RangeSpec(
       optimalMin: 40,
       optimalMax: 60,
       acceptableMin: 30,
       acceptableMax: 70,
     ),
-    temperature: _RangeSpec(
+    temperature: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 25,
     ),
-    humidity: _RangeSpec(
+    humidity: RangeSpec(
       optimalMin: 50,
       optimalMax: 70,
       acceptableMin: 40,
       acceptableMax: 80,
     ),
-    heatIndex: _RangeSpec(
+    heatIndex: RangeSpec(
       optimalMin: 15,
       optimalMax: 20,
       acceptableMin: 10,
       acceptableMax: 27,
     ),
-    ec: _RangeSpec(
+    ec: RangeSpec(
       optimalMin: 1.2,
       optimalMax: 2.4,
       acceptableMin: 0.8,
@@ -314,47 +283,35 @@ final Map<String, StageConditions> kStageConditions = {
     npkGuidance:
         'Maintain balanced NPK; ease off heavy nitrogen as leaves mature.',
   ),
-  'Bolting': const StageConditions(
-    pH: _RangeSpec(
-      optimalMin: 6.0,
-      optimalMax: 7.0,
-      acceptableMin: 5.5,
-      acceptableMax: 7.5,
-    ),
-    soilMoisture: _RangeSpec(
-      optimalMin: 35,
-      optimalMax: 55,
-      acceptableMin: 25,
-      acceptableMax: 65,
-    ),
-    temperature: _RangeSpec(
-      optimalMin: 12,
-      optimalMax: 18,
-      acceptableMin: 8,
-      acceptableMax: 22,
-    ),
-    humidity: _RangeSpec(
-      optimalMin: 45,
-      optimalMax: 65,
-      acceptableMin: 35,
-      acceptableMax: 75,
-    ),
-    heatIndex: _RangeSpec(
-      optimalMin: 12,
-      optimalMax: 18,
-      acceptableMin: 8,
-      acceptableMax: 25,
-    ),
-    ec: _RangeSpec(
-      optimalMin: 1.0,
-      optimalMax: 2.0,
-      acceptableMin: 0.7,
-      acceptableMax: 2.5,
-    ),
-    npkGuidance:
-        'Reduce fertilizing — the plant is shifting energy into flowering.',
-  ),
 };
+
+// ═════════════════════════════════════════════════════════════════════════
+// 3. MODELS & HELPERS
+// ═════════════════════════════════════════════════════════════════════════
+
+enum _FactorStatus { optimal, caution, critical, unknown }
+
+extension on _FactorStatus {
+  Color get color => switch (this) {
+    _FactorStatus.optimal => AppColors.optimal,
+    _FactorStatus.caution => AppColors.caution,
+    _FactorStatus.critical => AppColors.critical,
+    _FactorStatus.unknown => AppColors.textTertiary,
+  };
+}
+
+/// One row in the "Optimal conditions" breakdown.
+class _ConditionFactor {
+  final String name;
+  final String displayValue;
+  final _FactorStatus status;
+
+  const _ConditionFactor({
+    required this.name,
+    required this.displayValue,
+    required this.status,
+  });
+}
 
 // A recommendation the user marked done / dismissed. It stays hidden until
 // [until] passes, the sensor returns to range, or it gets worse.
@@ -364,6 +321,79 @@ class _Hidden {
   const _Hidden(this.until, this.level);
 }
 
+// "2026-05-07" — the format of the `planting_date` column.
+String _fmtDate(DateTime d) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${d.year}-${two(d.month)}-${two(d.day)}';
+}
+
+/// Index into [kGrowthStages] for a day count; past the final range it
+/// stays on the last stage.
+int _stageIndexFor(int daysSincePlanting) {
+  for (int i = 0; i < kGrowthStages.length; i++) {
+    final stage = kGrowthStages[i];
+    final isLast = i == kGrowthStages.length - 1;
+    if (daysSincePlanting >= stage.minDay &&
+        (daysSincePlanting < stage.maxDay || isLast)) {
+      return i;
+    }
+  }
+  return kGrowthStages.length - 1;
+}
+
+_FactorStatus _statusForValue(RangeSpec range, double value) {
+  if (value >= range.optimalMin && value <= range.optimalMax) {
+    return _FactorStatus.optimal;
+  }
+  if (value >= range.acceptableMin && value <= range.acceptableMax) {
+    return _FactorStatus.caution;
+  }
+  return _FactorStatus.critical;
+}
+
+/// The device already classifies NPK status per reading in `nutrient_rec`
+/// (e.g. "Nutrient levels optimal", "Nitrogen low (0 mg/kg) - apply
+/// nitrogen"). Rather than re-deriving thresholds against raw sensor
+/// units, this parses that verdict directly so it never disagrees with
+/// what the device itself reported.
+_FactorStatus _statusFromNutrientRec(String? nutrientRec) {
+  if (nutrientRec == null) return _FactorStatus.unknown;
+  final text = nutrientRec.toLowerCase();
+  if (text.contains('unavailable')) return _FactorStatus.unknown;
+  if (text.contains('optimal')) return _FactorStatus.optimal;
+  if (text.contains('low') || text.contains('high') || text.contains('apply')) {
+    return _FactorStatus.caution;
+  }
+  return _FactorStatus.unknown;
+}
+
+/// Composite score: optimal = 2 points, caution = 1, critical = 0.
+/// Unknown factors are excluded from both the numerator and denominator
+/// so missing sensors don't drag the score down unfairly.
+int? _growthConditionsScore(List<_ConditionFactor> factors) {
+  var known = 0, points = 0;
+  for (final f in factors) {
+    switch (f.status) {
+      case _FactorStatus.optimal:
+        known++;
+        points += 2;
+      case _FactorStatus.caution:
+        known++;
+        points += 1;
+      case _FactorStatus.critical:
+        known++;
+      case _FactorStatus.unknown:
+        break;
+    }
+  }
+  if (known == 0) return null;
+  return ((points / (known * 2)) * 100).round();
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// 4. PLANT PROFILE PAGE
+// ═════════════════════════════════════════════════════════════════════════
+
 class PlantProfilePage extends StatefulWidget {
   const PlantProfilePage({super.key});
 
@@ -371,13 +401,42 @@ class PlantProfilePage extends StatefulWidget {
   State<PlantProfilePage> createState() => _PlantProfilePageState();
 }
 
-class _PlantProfilePageState extends State<PlantProfilePage> {
+class _PlantProfilePageState extends State<PlantProfilePage>
+    with OfflineNotice<PlantProfilePage> {
+  // ─────────────────────────── CONSTANTS ───────────────────────────
+
   static const String _hiddenPrefsKey = 'insights_hidden_v1';
   static const Duration _snoozeFor = Duration(hours: 6);
 
+  // Newest readings kept. The latest one drives the conditions; the whole
+  // window feeds the trend notes in the recommendations.
+  static const int _recentReadingsWindow = 20;
+
+  // How close (in pixels) to the bottom before "back to top" appears.
+  static const double _showTopWithin = 400;
+
+  // Press-and-hold on the current stage step.
+  static const Duration _peekHoldDelay = Duration(milliseconds: 350);
+  static const double _peekMoveSlop = 12;
+
+  // Background of the tags in the conditions breakdown.
+  static final BoxDecoration _chipDecoration = BoxDecoration(
+    color: AppColors.authField,
+    borderRadius: BorderRadius.circular(AppRadius.field),
+  );
+
+  // ─────────────────────────── SERVICES ───────────────────────────
+
   final _supabase = Supabase.instance.client;
 
-  Map<String, dynamic> _plantInfo = {};
+  // ─────────────────────────── STATE ───────────────────────────
+
+  // Device whose readings are on screen. A crop-list update for the same
+  // device (e.g. a new planting date) refreshes quietly instead of clearing
+  // the page.
+  String? _loadedDevice;
+
+  // Readings and the recommendations built from them.
   List<Map<String, dynamic>> _recentReadings = []; // newest → oldest
   List<Recommendation> _recs = [];
   final Map<String, _Hidden> _hidden = {};
@@ -385,6 +444,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   String? _readingsError;
   bool _isLoading = true;
   bool _isSavingDate = false;
+
+  // Re-reads the sensors every 30s; this also keeps "Updated x mins ago"
+  // counting up.
   Timer? _timer;
 
   /// Stage whose optimal conditions are shown under the tracker while its
@@ -402,12 +464,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   final GlobalKey _scrollKey = GlobalKey(); // the scrolling area
   final GlobalKey _peekCardKey = GlobalKey(); // the stage details card
   bool _showTop = false;
-  // How close (in pixels) to the bottom before the button appears.
-  static const double _showTopWithin = 400;
 
-  // Newest readings kept. The latest one drives the conditions; the whole
-  // window feeds the trend notes in the recommendations.
-  static const int _recentReadingsWindow = 20;
+  // ─────────────────────────── LIFECYCLE ───────────────────────────
 
   @override
   void initState() {
@@ -418,8 +476,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       await _loadHidden();
       _onCropChanged();
     });
-    // Re-reads the sensors every 30s; this also keeps "Updated x mins ago"
-    // counting up.
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchAll());
   }
 
@@ -432,8 +488,30 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     super.dispose();
   }
 
+  // ─────────────────────────── NO INTERNET (OfflineNotice) ───────────────────────────
+
+  @override
+  int get tabIndex => 2;
+
+  @override
+  bool get hasLastData => _recentReadings.isNotEmpty;
+
+  @override
+  void onBackOnline() => _fetchAll();
+
+  // ─────────────────────────── CROP SELECTION ───────────────────────────
+
   void _onCropChanged() {
     if (!mounted || !CropService.instance.loaded) return;
+    final crop = CropService.instance.selected;
+    if (crop != null && crop.deviceId == _loadedDevice) {
+      // Same crop: keep the last data on screen (name and planting date
+      // come straight from the crop) and refresh quietly.
+      setState(() {});
+      _fetchAll();
+      return;
+    }
+    _loadedDevice = crop?.deviceId;
     setState(() {
       _isLoading = true;
       _recentReadings = [];
@@ -444,17 +522,26 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     _fetchAll();
   }
 
+  // ─────────────────────────── DATA: READINGS ───────────────────────────
+
   Future<void> _fetchAll({bool silent = true}) async {
+    // A manual refresh also retries the crop list if it could not load.
+    if (!silent && CropService.instance.offline) {
+      await CropService.instance.load();
+      if (!mounted) return;
+    }
     final crop = CropService.instance.selected;
     if (crop == null) {
       if (!mounted) return;
       setState(() {
-        _plantInfo = {};
         _recentReadings = [];
         _recs = [];
         _readingsError = null;
         _isLoading = false;
       });
+      if (CropService.instance.offline) {
+        markConnection(false, userAction: !silent);
+      }
       return;
     }
     try {
@@ -463,49 +550,46 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           .select()
           .eq('device_id', crop.deviceId)
           .order('timestamp', ascending: false)
-          .limit(_recentReadingsWindow);
+          .limit(_recentReadingsWindow)
+          .timeout(kRequestTimeout);
 
       // Ignore the result if the user switched crop while this was loading.
       if (!mounted || CropService.instance.selected?.deviceId != crop.deviceId) {
         return;
       }
 
-      // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
-      final rows = (readingsResponse as List)
-          .map((row) => normalizeReading(Map<String, dynamic>.from(row as Map)))
-          .toList();
-      final recs = rows.isEmpty
-          ? <Recommendation>[]
-          : buildRecommendations(rows.first, rows.reversed.toList());
-
-      // Forget hidden items whose sensor is back in range, so a new problem
-      // later is not silently hidden.
-      final before = _hidden.length;
-      _hidden.removeWhere((k, _) => !recs.any((r) => r.key == k));
-
-      setState(() {
-        _plantInfo = {
-          'device_id': crop.deviceId,
-          'plant_name': crop.name,
-          'planting_date': crop.plantingDate?.toIso8601String(),
-        };
-        _recentReadings = rows;
-        _recs = recs;
-        _readingsError =
-            rows.isEmpty ? 'No sensor data found for this crop yet.' : null;
-        _isLoading = false;
-      });
-      if (_hidden.length != before) _saveHidden();
+      markConnection(true);
+      LastData.save('profile_readings_${crop.deviceId}', readingsResponse);
+      _applyReadings(readingsResponse as List);
     } catch (e) {
       debugPrint("PlantProfilePage fetch error: $e");
       if (!mounted) return;
+      // No internet and nothing on screen yet (e.g. the app was opened
+      // offline): show the readings saved on the phone.
+      if (_recentReadings.isEmpty && isConnectionError(e)) {
+        final saved = await LastData.read('profile_readings_${crop.deviceId}');
+        if (!mounted) return;
+        if (saved is List &&
+            saved.isNotEmpty &&
+            _recentReadings.isEmpty &&
+            CropService.instance.selected?.deviceId == crop.deviceId) {
+          try {
+            _applyReadings(saved);
+          } catch (e) {
+            debugPrint('Saved readings unreadable: $e');
+          }
+        }
+      }
       setState(() {
         if (_recentReadings.isEmpty) {
           _readingsError = 'Could not load sensor data. Check your connection.';
         }
         _isLoading = false;
       });
-      if (!silent && _recentReadings.isNotEmpty) {
+      if (isConnectionError(e)) {
+        // Last data stays; the banner and snackbar explain why.
+        markConnection(false, userAction: !silent);
+      } else if (!silent && _recentReadings.isNotEmpty) {
         AppSnack.show(
           context,
           'Could not refresh. Showing the last data.',
@@ -515,75 +599,70 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     }
   }
 
-  // --- Back to top ------------------------------------------------------------
+  /// Shows [raw] sensor_readings rows (newest first): from the server, or
+  /// the copy saved on the phone when offline.
+  void _applyReadings(List raw) {
+    // normalizeReading converts EC from µS/cm (Pi) to mS/cm (app).
+    final rows = [
+      for (final row in raw)
+        normalizeReading(Map<String, dynamic>.from(row as Map)),
+    ];
+    final recs = rows.isEmpty
+        ? <Recommendation>[]
+        : buildRecommendations(rows.first, rows.reversed.toList());
 
-  // Show the button only when the user is near the bottom of the page.
-  void _onPageScroll() {
-    if (!_scroll.hasClients) return;
-    final p = _scroll.position;
-    final near =
-        p.maxScrollExtent > 0 && p.pixels >= p.maxScrollExtent - _showTopWithin;
-    if (near != _showTop) setState(() => _showTop = near);
+    // Forget hidden items whose sensor is back in range, so a new problem
+    // later is not silently hidden.
+    final before = _hidden.length;
+    final activeKeys = {for (final r in recs) r.key};
+    _hidden.removeWhere((k, _) => !activeKeys.contains(k));
+
+    setState(() {
+      _recentReadings = rows;
+      _recs = recs;
+      _readingsError = rows.isEmpty
+          ? 'No sensor data found for this crop yet.'
+          : null;
+      _isLoading = false;
+    });
+    if (_hidden.length != before) _saveHidden();
   }
 
-  void _scrollToTop() {
-    if (!_scroll.hasClients) return;
-    _scroll.animateTo(
-      0,
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutCubic,
+  Map<String, dynamic>? get _latestReading =>
+      _recentReadings.isNotEmpty ? _recentReadings.first : null;
+
+  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
+  // clock fields are already local time, so they are rebuilt as a local
+  // DateTime before comparing with now.
+  String _updatedText() {
+    final raw = _latestReading?['timestamp'];
+    if (raw == null) return '';
+    final utc = DateTime.tryParse(raw.toString())?.toUtc();
+    if (utc == null) return '';
+    final dt = DateTime(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
     );
+    final diff = DateTime.now().difference(dt);
+
+    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'Updated $m min${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
+    }
+    final d = diff.inDays;
+    return 'Updated $d day${d == 1 ? '' : 's'} ago';
   }
 
-  /// Small round "top" button. It sits just above the "+" button.
-  Widget _buildBackToTop() {
-    return Positioned(
-      right: AppSpace.page + 5, // lines up with the centre of the 56px "+"
-      bottom: AppSpace.page + 56 + 12,
-      child: IgnorePointer(
-        ignoring: !_showTop,
-        child: AnimatedSlide(
-          offset: _showTop ? Offset.zero : const Offset(0, 0.6),
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-          child: AnimatedOpacity(
-            opacity: _showTop ? 1 : 0,
-            duration: const Duration(milliseconds: 250),
-            child: GestureDetector(
-              onTap: _scrollToTop,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: AppColors.green,
-                  shape: BoxShape.circle,
-                  boxShadow: AppShadows.card,
-                ),
-                child: const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(AppIcons.up, size: 16, color: AppColors.onGreen),
-                    Text(
-                      'top',
-                      style: TextStyle(
-                        fontSize: 9,
-                        height: 1,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.onGreen,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // --- Recommendations: hide / snooze ---------------------------------------
+  // ─────────────────────────── RECOMMENDATIONS: HIDE / SNOOZE ───────────────────────────
 
   Future<void> _loadHidden() async {
     try {
@@ -638,41 +717,15 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
-  // clock fields are already local time, so they are rebuilt as a local
-  // DateTime before comparing with now.
-  String _updatedText() {
-    final raw = _latestReading?['timestamp'];
-    if (raw == null) return '';
-    final utc = DateTime.tryParse(raw.toString())?.toUtc();
-    if (utc == null) return '';
-    final dt = DateTime(
-      utc.year,
-      utc.month,
-      utc.day,
-      utc.hour,
-      utc.minute,
-      utc.second,
-    );
-    final diff = DateTime.now().difference(dt);
+  // ─────────────────────────── PLANTING DATE ───────────────────────────
 
-    if (diff.isNegative || diff.inSeconds < 60) return 'Updated just now';
-    if (diff.inMinutes < 60) {
-      final m = diff.inMinutes;
-      return 'Updated $m min${m == 1 ? '' : 's'} ago';
-    }
-    if (diff.inHours < 24) {
-      final h = diff.inHours;
-      return 'Updated $h hr${h == 1 ? '' : 's'} ago';
-    }
-    final d = diff.inDays;
-    return 'Updated $d day${d == 1 ? '' : 's'} ago';
+  /// Days since the selected crop's planting date, or null when none is set.
+  int? _daysSincePlanting() {
+    final plantingDate = CropService.instance.selected?.plantingDate;
+    if (plantingDate == null) return null;
+    final diff = DateTime.now().difference(plantingDate).inDays;
+    return diff < 0 ? 0 : diff;
   }
-
-  // --- Planting date (add / edit) -------------------------------------------
-
-  String _two(int n) => n.toString().padLeft(2, '0');
-  String _fmtDate(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
 
   /// Opens the small pop-up, then saves whatever date the user confirmed.
   Future<void> _openPlantingDateDialog() async {
@@ -694,7 +747,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
           .from('crops')
           .update({'planting_date': _fmtDate(picked)})
           .eq('crop_id', crop.id)
-          .select();
+          .select()
+          .timeout(kRequestTimeout);
       if ((updated as List).isEmpty) {
         throw Exception('No rows updated');
       }
@@ -714,7 +768,9 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       if (!mounted) return;
       AppSnack.show(
         context,
-        'Could not update the planting date. Please try again.',
+        isConnectionError(e)
+            ? 'No internet connection. The planting date was not saved.'
+            : 'Could not update the planting date. Please try again.',
         type: AppSnackType.error,
       );
     } finally {
@@ -722,145 +778,42 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     }
   }
 
-  // --- Growth stage helpers -------------------------------------------------
-
-  /// Reads the planting date from plant_info. Supabase returns `date`
-  /// columns as 'YYYY-MM-DD' strings. Returns null if missing/invalid.
-  DateTime? _getPlantingDate() {
-    final raw = _plantInfo['planting_date'];
-    if (raw == null) return null;
-    if (raw is DateTime) return raw;
-    if (raw is String) {
-      return DateTime.tryParse(raw);
-    }
-    return null;
-  }
-
-  int? _getDaysSincePlanting() {
-    final plantingDate = _getPlantingDate();
-    if (plantingDate == null) return null;
-    final now = DateTime.now();
-    final diff = now.difference(plantingDate).inDays;
-    return diff < 0 ? 0 : diff;
-  }
-
-  /// Returns the index into kGrowthStages for the current day count.
-  /// Clamps to the last stage if past the final range.
-  int _getCurrentStageIndex(int daysSincePlanting) {
-    for (int i = 0; i < kGrowthStages.length; i++) {
-      final stage = kGrowthStages[i];
-      final isLast = i == kGrowthStages.length - 1;
-      if (daysSincePlanting >= stage.minDay &&
-          (daysSincePlanting < stage.maxDay || isLast)) {
-        return i;
-      }
-    }
-    return kGrowthStages.length - 1;
-  }
-
-  // --- Growth conditions (pH, moisture, temp, humidity, heat index, EC, NPK) --
-
-  Map<String, dynamic>? get _latestReading =>
-      _recentReadings.isNotEmpty ? _recentReadings.first : null;
-
-  _FactorStatus _statusForValue(_RangeSpec range, double value) {
-    if (value >= range.optimalMin && value <= range.optimalMax) {
-      return _FactorStatus.optimal;
-    }
-    if (value >= range.acceptableMin && value <= range.acceptableMax) {
-      return _FactorStatus.caution;
-    }
-    return _FactorStatus.critical;
-  }
-
-  /// The device already classifies NPK status per reading in `nutrient_rec`
-  /// (e.g. "Nutrient levels optimal", "Nitrogen low (0 mg/kg) - apply
-  /// nitrogen"). Rather than re-deriving thresholds against raw sensor
-  /// units, this parses that verdict directly so it never disagrees with
-  /// what the device itself reported.
-  _FactorStatus _statusFromNutrientRec(String? nutrientRec) {
-    if (nutrientRec == null) return _FactorStatus.unknown;
-    final text = nutrientRec.toLowerCase();
-    if (text.contains('unavailable')) return _FactorStatus.unknown;
-    if (text.contains('optimal')) return _FactorStatus.optimal;
-    if (text.contains('low') ||
-        text.contains('high') ||
-        text.contains('apply')) {
-      return _FactorStatus.caution;
-    }
-    return _FactorStatus.unknown;
-  }
+  // ─────────────────────────── GROWTH CONDITIONS ───────────────────────────
 
   /// Builds the seven-factor breakdown for one specific stage, checked
   /// against that stage's own ideal ranges (not a single global set) —
-  /// germination and bolting want different soil moisture and temperature,
-  /// for instance. Uses the latest reading for every instantaneous value.
+  /// germination and harvesting want different soil moisture and
+  /// temperature, for instance. Uses the latest reading for every value.
   List<_ConditionFactor> _buildConditionFactorsForStage(String stageName) {
     final ranges = kStageConditions[stageName]!;
     final latest = _latestReading;
 
-    double? asDouble(dynamic v) => v is num ? v.toDouble() : null;
+    // One sensor value shown with [digits] decimals and checked against
+    // [range]; "—" when the reading has no value for it.
+    _ConditionFactor measured(
+      String name,
+      String key,
+      RangeSpec range,
+      int digits, [
+      String unit = '',
+    ]) {
+      final raw = latest?[key];
+      final v = raw is num ? raw.toDouble() : null;
+      return _ConditionFactor(
+        name: name,
+        displayValue: v == null ? '—' : '${v.toStringAsFixed(digits)}$unit',
+        status: v == null ? _FactorStatus.unknown : _statusForValue(range, v),
+      );
+    }
 
-    final ph = asDouble(latest?['pH']);
-    final soilMoisture = asDouble(latest?['moisture']);
-    final temperature = asDouble(latest?['temperature']);
-    final humidity = asDouble(latest?['humidity']);
-    final heatIndex = asDouble(latest?['heat_index']);
-    final ec = asDouble(latest?['EC']);
     final nutrientRec = latest?['nutrient_rec'] as String?;
-
     return [
-      _ConditionFactor(
-        name: 'Soil pH',
-        icon: AppIcons.soilPh,
-        displayValue: ph != null ? ph.toStringAsFixed(1) : '—',
-        status: ph != null
-            ? _statusForValue(ranges.pH, ph)
-            : _FactorStatus.unknown,
-      ),
-      _ConditionFactor(
-        name: 'Soil moisture',
-        displayValue: soilMoisture != null
-            ? '${soilMoisture.toStringAsFixed(0)}%'
-            : '—',
-        status: soilMoisture != null
-            ? _statusForValue(ranges.soilMoisture, soilMoisture)
-            : _FactorStatus.unknown,
-      ),
-      _ConditionFactor(
-        name: 'Temperature',
-        displayValue: temperature != null
-            ? '${temperature.toStringAsFixed(1)}°C'
-            : '—',
-        status: temperature != null
-            ? _statusForValue(ranges.temperature, temperature)
-            : _FactorStatus.unknown,
-      ),
-      _ConditionFactor(
-        name: 'Humidity',
-        displayValue: humidity != null
-            ? '${humidity.toStringAsFixed(0)}%'
-            : '—',
-        status: humidity != null
-            ? _statusForValue(ranges.humidity, humidity)
-            : _FactorStatus.unknown,
-      ),
-      _ConditionFactor(
-        name: 'Heat index',
-        displayValue: heatIndex != null
-            ? '${heatIndex.toStringAsFixed(1)}°C'
-            : '—',
-        status: heatIndex != null
-            ? _statusForValue(ranges.heatIndex, heatIndex)
-            : _FactorStatus.unknown,
-      ),
-      _ConditionFactor(
-        name: 'EC',
-        displayValue: ec != null ? ec.toStringAsFixed(2) : '—',
-        status: ec != null
-            ? _statusForValue(ranges.ec, ec)
-            : _FactorStatus.unknown,
-      ),
+      measured('Soil pH', 'pH', ranges.pH, 1),
+      measured('Soil moisture', 'moisture', ranges.soilMoisture, 0, '%'),
+      measured('Temperature', 'temperature', ranges.temperature, 1, '°C'),
+      measured('Humidity', 'humidity', ranges.humidity, 0, '%'),
+      measured('Heat index', 'heat_index', ranges.heatIndex, 1, '°C'),
+      measured('EC', 'EC', ranges.ec, 2),
       _ConditionFactor(
         name: 'N-P-K',
         displayValue: nutrientRec ?? 'No data',
@@ -869,145 +822,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     ];
   }
 
-  /// Composite score: optimal = 2 points, caution = 1, critical = 0,
-  /// unknown factors are excluded from both the numerator and denominator
-  /// so missing sensors don't drag the score down unfairly.
-  int? _growthConditionsScore(List<_ConditionFactor> factors) {
-    final known = factors
-        .where((f) => f.status != _FactorStatus.unknown)
-        .toList();
-    if (known.isEmpty) return null;
-    final points = known.fold<int>(0, (sum, f) {
-      switch (f.status) {
-        case _FactorStatus.optimal:
-          return sum + 2;
-        case _FactorStatus.caution:
-          return sum + 1;
-        case _FactorStatus.critical:
-        case _FactorStatus.unknown:
-          return sum;
-      }
-    });
-    return ((points / (known.length * 2)) * 100).round();
-  }
-
-  // --- UI ---------------------------------------------------------------
-
-  /// Plain title + "Updated ..." line at the top (no green header).
-  Widget _buildTitleBlock() {
-    final updated = _updatedText();
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        AppSpace.page,
-        MediaQuery.of(context).padding.top + 12,
-        AppSpace.page,
-        4,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Plant Profile',
-            style: AppText.sectionTitle.copyWith(color: AppColors.darkGreen),
-          ),
-          if (updated.isNotEmpty) Text(updated, style: AppText.subtitle),
-        ],
-      ),
-    );
-  }
-
-  /// Plant photo card (kept small so the timeline sits higher on the page).
-  /// The day-of-growth text sits right under the photo.
-  Widget _buildCropImageCard() {
-    final imageUrl =
-        CropService.instance.selected?.imageUrl ??
-        _latestReading?['image_url'] as String?;
-    final days = _getDaysSincePlanting();
-
-    return Center(
-      child: AppCard(
-        radius: 16,
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            PlantImage(
-              imageUrl: imageUrl,
-              borderRadius: 5,
-              size: 200,
-              enableZoom: true,
-            ),
-            const SizedBox(height: 8),
-            if (days != null)
-              Text(
-                'Day $days of growth',
-                style: AppText.body.copyWith(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              )
-            else
-              Text(
-                'Planting date not set — tap + to add one.',
-                textAlign: TextAlign.center,
-                style: AppText.subtitle.copyWith(
-                  fontSize: 12,
-                  color: AppColors.textTertiary,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static const Duration _peekHoldDelay = Duration(milliseconds: 350);
-  static const double _peekMoveSlop = 12;
-
-  void _showPeek(int index) {
-    setState(() {
-      _peekIndex = index;
-      _peekVisible = true;
-    });
-    // Once the card has been laid out, scroll just enough that all of it is
-    // on screen, so the user never has to scroll to read it.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _revealPeekCard());
-  }
-
-  void _hidePeek() {
-    if (!_peekVisible) return;
-    setState(() => _peekVisible = false);
-  }
-
-  /// Scrolls the page down by however much of the stage card sticks out
-  /// below the visible area. Does nothing if it already fits.
-  void _revealPeekCard() {
-    if (!mounted || !_peekVisible || !_scroll.hasClients) return;
-    final viewBox = _scrollKey.currentContext?.findRenderObject();
-    final cardBox = _peekCardKey.currentContext?.findRenderObject();
-    if (viewBox is! RenderBox || cardBox is! RenderBox) return;
-    if (!viewBox.hasSize || !cardBox.hasSize) return;
-
-    final viewBottom =
-        viewBox.localToGlobal(Offset(0, viewBox.size.height)).dy;
-    final cardBottom =
-        cardBox.localToGlobal(Offset(0, cardBox.size.height)).dy;
-    final overflow = cardBottom - (viewBottom - 12);
-    if (overflow <= 0) return;
-
-    final target = (_scroll.offset + overflow).clamp(
-      0.0,
-      _scroll.position.maxScrollExtent,
-    );
-    if (target > _scroll.offset) {
-      _scroll.animateTo(
-        target,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    }
-  }
+  // ─────────────────────────── STAGE PEEK (press and hold) ───────────────────────────
 
   // The stage steps use raw pointer events instead of a long-press gesture,
   // so the hold never takes over the touch: once the card is showing, the
@@ -1036,31 +851,224 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     _hidePeek();
   }
 
-  /// Card with a gray outline AND the soft shadow used by the cards on the
-  /// other pages (AppCard gives one or the other, so the shadow sits on a
-  /// wrapper).
-  Widget _outlinedShadowCard({
-    required Widget child,
-    Color color = AppColors.disabledStart,
-    EdgeInsetsGeometry padding = const EdgeInsets.all(14),
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        boxShadow: AppShadows.card,
-      ),
-      child: AppCard(outlineColor: color, padding: padding, child: child),
+  void _showPeek(int index) {
+    setState(() {
+      _peekIndex = index;
+      _peekVisible = true;
+    });
+    // Once the card has been laid out, scroll just enough that all of it is
+    // on screen, so the user never has to scroll to read it.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealPeekCard());
+  }
+
+  void _hidePeek() {
+    if (!_peekVisible) return;
+    setState(() => _peekVisible = false);
+  }
+
+  /// Scrolls the page down by however much of the stage card sticks out
+  /// below the visible area. Does nothing if it already fits.
+  void _revealPeekCard() {
+    if (!mounted || !_peekVisible || !_scroll.hasClients) return;
+    final viewBox = _scrollKey.currentContext?.findRenderObject();
+    final cardBox = _peekCardKey.currentContext?.findRenderObject();
+    if (viewBox is! RenderBox || cardBox is! RenderBox) return;
+    if (!viewBox.hasSize || !cardBox.hasSize) return;
+
+    final viewBottom = viewBox.localToGlobal(Offset(0, viewBox.size.height)).dy;
+    final cardBottom = cardBox.localToGlobal(Offset(0, cardBox.size.height)).dy;
+    final overflow = cardBottom - (viewBottom - 12);
+    if (overflow <= 0) return;
+
+    final target = (_scroll.offset + overflow).clamp(
+      0.0,
+      _scroll.position.maxScrollExtent,
+    );
+    if (target > _scroll.offset) {
+      _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  // ─────────────────────────── PAGE SCROLL ───────────────────────────
+
+  // Show the "back to top" button only when the user is near the bottom.
+  void _onPageScroll() {
+    if (!_scroll.hasClients) return;
+    final p = _scroll.position;
+    final near =
+        p.maxScrollExtent > 0 && p.pixels >= p.maxScrollExtent - _showTopWithin;
+    if (near != _showTop) setState(() => _showTop = near);
+  }
+
+  void _scrollToTop() {
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
     );
   }
 
+  // ═══════════════════════════ UI (top of screen → bottom) ═══════════════════════════
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCrop = CropService.instance.selected != null;
+    final showEmpty = CropService.instance.loaded && !hasCrop;
+    final days = _daysSincePlanting();
+    final open = _recs.where(_isOpen).toList(); // most urgent first
+
+    // Stack so the round "+" and "top" buttons can float over the bottom-right
+    // corner of the page, above the bottom navigation bar.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Column(
+          children: [
+            _buildTitleBlock(),
+
+            // Body
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : showEmpty
+                      // Pullable too, so a failed start-up can be retried.
+                      ? AppRefreshable(
+                          onRefresh: () => _fetchAll(silent: false),
+                          child: CropService.instance.offline
+                              ? const AppOfflineState()
+                              : const AppNoCropState(),
+                        )
+                      : RefreshIndicator(
+                          color: AppColors.green,
+                          onRefresh: () => _fetchAll(silent: false),
+                          child: SingleChildScrollView(
+                            key: _scrollKey,
+                            controller: _scroll,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            // Extra bottom space so the floating buttons never
+                            // cover the last card.
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpace.page,
+                              AppSpace.gap,
+                              AppSpace.page,
+                              96,
+                            ),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              fit: StackFit.passthrough,
+                              children: [
+                                Column(
+                                  children: [
+                                    _buildCropImageCard(days),
+                                    _buildGrowthTimelineCard(days),
+                                    _buildInsightsCard(open),
+                                    _buildRecommendations(open),
+                                  ],
+                                ),
+                                // Last child = drawn on top of the cards.
+                                _buildStageDetailsOverlay(days),
+                              ],
+                            ),
+                          ),
+                        ),
+            ),
+          ],
+        ),
+
+        if (hasCrop && !_isLoading) ...[
+          _buildBackToTop(),
+          _buildPlantingDateButton(),
+        ],
+      ],
+    );
+  }
+
+  // ── 1. TITLE ──
+
+  /// Plain title + "Updated ..." line at the top (no green header).
+  Widget _buildTitleBlock() {
+    final updated = _updatedText();
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        AppSpace.page,
+        MediaQuery.of(context).padding.top + 12,
+        AppSpace.page,
+        4,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Plant Profile',
+            style: AppText.sectionTitle.copyWith(color: AppColors.darkGreen),
+          ),
+          if (updated.isNotEmpty) Text(updated, style: AppText.subtitle),
+        ],
+      ),
+    );
+  }
+
+  // ── 2. PLANT PHOTO + DAY OF GROWTH ──
+
+  /// Plant photo card (kept small so the timeline sits higher on the page).
+  /// The day-of-growth text sits right under the photo.
+  Widget _buildCropImageCard(int? days) {
+    final imageUrl =
+        CropService.instance.selected?.imageUrl ??
+        _latestReading?['image_url'] as String?;
+
+    return Center(
+      child: AppCard(
+        radius: 16,
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PlantImage(
+              imageUrl: imageUrl,
+              borderRadius: 5,
+              size: 190,
+              enableZoom: true,
+            ),
+            const SizedBox(height: 8),
+            if (days != null)
+              Text(
+                'Day $days of growth',
+                style: AppText.body.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              )
+            else
+              Text(
+                'Planting date not set — tap + to add one.',
+                textAlign: TextAlign.center,
+                style: AppText.subtitle.copyWith(
+                  fontSize: 12,
+                  color: AppColors.textTertiary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── 3. GROWTH STAGE TIMELINE ──
+
   /// Growth Stage Timeline card: a horizontal progress tracker (germination
   /// -> seedling -> vegetative -> harvesting). Finished stages show a check
-  /// mark. Press and hold any stage and a card with its optimal conditions
-  /// lays over the cards right below this one, pointing at that stage; let
-  /// go and it closes again.
-  Widget _buildGrowthTimelineCard() {
-    final days = _getDaysSincePlanting();
-    final currentIndex = days != null ? _getCurrentStageIndex(days) : -1;
+  /// mark. Press and hold the current stage and a card with its optimal
+  /// conditions lays over the cards right below this one, pointing at that
+  /// stage; let go and it closes again.
+  Widget _buildGrowthTimelineCard(int? days) {
+    final currentIndex = days != null ? _stageIndexFor(days) : -1;
 
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -1126,10 +1134,12 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
             // Only the current stage can be held to view its conditions.
             // Hold to view, release to close; scrolling still works.
             behavior: HitTestBehavior.opaque,
-            onPointerDown:
-                isCurrent ? (e) => _onStagePointerDown(i, e.position) : null,
-            onPointerMove:
-                isCurrent ? (e) => _onStagePointerMove(e.position) : null,
+            onPointerDown: isCurrent
+                ? (e) => _onStagePointerDown(i, e.position)
+                : null,
+            onPointerMove: isCurrent
+                ? (e) => _onStagePointerMove(e.position)
+                : null,
             onPointerUp: isCurrent ? (_) => _onStagePointerEnd() : null,
             onPointerCancel: isCurrent ? (_) => _onStagePointerEnd() : null,
             child: Column(
@@ -1181,7 +1191,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
                     maxLines: 1,
                     style: TextStyle(
                       fontSize: 10.5,
-                      color: textColor.withOpacity(0.7),
+                      color: textColor.withValues(alpha: 0.7),
                     ),
                   ),
                 ),
@@ -1192,6 +1202,8 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       }),
     );
   }
+
+  // ── 3a. STAGE DETAILS (floats over the cards below while held) ──
 
   /// The held stage's card. It lays over the cards under the timeline card
   /// (so nothing is pushed down or expanded) and scrolls together with the
@@ -1222,37 +1234,12 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  /// Slim progress bar with a dark track, as in the design.
-  Widget _stageBar(double value) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(3),
-      child: SizedBox(
-        width: double.infinity,
-        height: 6,
-        child: Stack(
-          children: [
-            const Positioned.fill(
-              child: ColoredBox(color: AppColors.emphasisOutline),
-            ),
-            Positioned.fill(
-              child: FractionallySizedBox(
-                alignment: Alignment.centerLeft,
-                widthFactor: value.clamp(0.0, 1.0),
-                child: const ColoredBox(color: AppColors.green),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// The held stage's title, day range and optimal conditions, in a gray
   /// bordered card with a small pointer aimed at that stage in the tracker.
   Widget _buildStageDetails(int index, int? daysSincePlanting) {
     final stage = kGrowthStages[index];
-    final isCurrent = daysSincePlanting != null &&
-        _getCurrentStageIndex(daysSincePlanting) == index;
+    final isCurrent =
+        daysSincePlanting != null && _stageIndexFor(daysSincePlanting) == index;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1269,8 +1256,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: _outlinedShadowCard(
-                // Gray border (matches the design).
-                color: AppColors.disabledStart,
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1317,16 +1302,110 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  Widget _statusDot(_FactorStatus status) => Container(
-    width: 8,
-    height: 8,
-    decoration: BoxDecoration(color: status.color, shape: BoxShape.circle),
-  );
+  /// Optimal-conditions breakdown for one stage, checked against that
+  /// stage's own target ranges: a two-column grid of tags, then N-P-K.
+  Widget _buildStageConditionsPanel(String stageName) {
+    final factors = _buildConditionFactorsForStage(stageName);
+    final score = _growthConditionsScore(factors);
+    final optimalCount = factors
+        .where((f) => f.status == _FactorStatus.optimal)
+        .length;
+    final knownCount = factors
+        .where((f) => f.status != _FactorStatus.unknown)
+        .length;
 
-  BoxDecoration get _chipDecoration => BoxDecoration(
-    color: AppColors.authField,
-    borderRadius: BorderRadius.circular(AppRadius.field),
-  );
+    final npk = factors.firstWhere((f) => f.name == 'N-P-K');
+    final grid = factors.where((f) => f.name != 'N-P-K').toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.track,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'OPTIMAL CONDITIONS',
+                  style: AppText.label.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              if (score != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.green.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$score%',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.darkGreen,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 1),
+          Text(
+            knownCount > 0
+                ? '$optimalCount out of $knownCount tracked factors optimal right now'
+                : 'No sensor data available yet',
+            style: AppText.caption.copyWith(fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          for (var i = 0; i < grid.length; i += 2)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(child: _conditionChip(grid[i])),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: i + 1 < grid.length
+                        ? _conditionChip(grid[i + 1])
+                        : const SizedBox(),
+                  ),
+                ],
+              ),
+            ),
+          _npkChip(npk),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(AppIcons.tip, size: 13, color: AppColors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  kStageConditions[stageName]!.npkGuidance,
+                  style: AppText.caption.copyWith(
+                    fontSize: 10.5,
+                    color: AppColors.textSecondary,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   /// One factor as a rounded tag: status dot and name on the left, value on
   /// the right, so names and values line up down each column.
@@ -1400,122 +1479,16 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  /// Optimal-conditions breakdown for one stage, checked against that
-  /// stage's own target ranges: a two-column grid of tags, then N-P-K.
-  Widget _buildStageConditionsPanel(String stageName) {
-    final factors = _buildConditionFactorsForStage(stageName);
-    final score = _growthConditionsScore(factors);
-    final optimalCount = factors
-        .where((f) => f.status == _FactorStatus.optimal)
-        .length;
-    final knownCount = factors
-        .where((f) => f.status != _FactorStatus.unknown)
-        .length;
-
-    final npk = factors.firstWhere((f) => f.name == 'N-P-K');
-    final grid = factors.where((f) => f.name != 'N-P-K').toList();
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.track,
-        borderRadius: BorderRadius.circular(AppRadius.field),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'OPTIMAL CONDITIONS',
-                  style: AppText.label.copyWith(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-              if (score != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.green.withOpacity(0.35),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '$score%',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.darkGreen,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 1),
-          Text(
-            knownCount > 0
-                ? '$optimalCount out of $knownCount tracked factors optimal right now'
-                : 'No sensor data available yet',
-            style: AppText.caption.copyWith(fontSize: 11),
-          ),
-          const SizedBox(height: 8),
-          for (var i = 0; i < grid.length; i += 2)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  Expanded(child: _conditionChip(grid[i])),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: i + 1 < grid.length
-                        ? _conditionChip(grid[i + 1])
-                        : const SizedBox(),
-                  ),
-                ],
-              ),
-            ),
-          _npkChip(npk),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(AppIcons.tip, size: 13, color: AppColors.textSecondary),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  kStageConditions[stageName]!.npkGuidance,
-                  style: AppText.caption.copyWith(
-                    fontSize: 10.5,
-                    color: AppColors.textSecondary,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Insights & Recommendations (moved here from the Insights page) ──
+  // ── 4. INSIGHTS & RECOMMENDATION SUMMARY ──
 
   /// "Insights & Recommendation" card: title and the Actions / Priorities /
   /// Critical counts. The recommendations themselves are separate cards below.
-  Widget _buildInsightsCard() {
+  Widget _buildInsightsCard(List<Recommendation> open) {
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: SizedBox(
         width: double.infinity,
         child: _outlinedShadowCard(
-          color: AppColors.disabledStart,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1531,7 +1504,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
               if (_recentReadings.isEmpty)
                 _buildNoReadings()
               else
-                _buildSummaryStrip(_recs.where(_isOpen).toList()),
+                _buildSummaryStrip(open),
             ],
           ),
         ),
@@ -1540,22 +1513,17 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
   }
 
   Widget _buildNoReadings() {
-    return Column(
-      children: [
-        Center(
-          child: Text(
-            _readingsError ?? 'No sensor data found for this crop yet.',
-            textAlign: TextAlign.center,
-            style: AppText.subtitle,
-          ),
+    final failed = _readingsError?.startsWith('Could not') ?? false;
+    if (!failed) return const AppNoDataState(compact: true);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          _readingsError!,
+          textAlign: TextAlign.center,
+          style: AppText.subtitle,
         ),
-        const SizedBox(height: 12),
-        AppButton(
-          label: 'Retry',
-          icon: AppIcons.refresh,
-          onPressed: () => _fetchAll(silent: false),
-        ),
-      ],
+      ),
     );
   }
 
@@ -1598,12 +1566,13 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
+  // ── 5. RECOMMENDATIONS: filter chips + cards ──
+
   /// Filter chips and the recommendation cards. They sit on the page itself,
   /// not inside the insights card. All priorities come first, the rest after.
-  Widget _buildRecommendations() {
+  Widget _buildRecommendations(List<Recommendation> open) {
     if (_recentReadings.isEmpty) return const SizedBox.shrink();
 
-    final open = _recs.where(_isOpen).toList(); // most urgent first
     if (open.isEmpty) {
       return const Padding(
         padding: EdgeInsets.only(top: AppSpace.cardGap),
@@ -1620,13 +1589,13 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
       );
     }
 
-    bool inFilter(Recommendation r) => _filter == null || r.category == _filter;
-    final priorities = open
-        .where((r) => r.score < kPriorityBelowScore && inFilter(r))
-        .toList();
-    final others = open
-        .where((r) => r.score >= kPriorityBelowScore && inFilter(r))
-        .toList();
+    // Split the filtered list into priorities and the rest in one pass.
+    final priorities = <Recommendation>[];
+    final others = <Recommendation>[];
+    for (final r in open) {
+      if (_filter != null && r.category != _filter) continue;
+      (r.score < kPriorityBelowScore ? priorities : others).add(r);
+    }
 
     return SizedBox(
       width: double.infinity,
@@ -1683,7 +1652,7 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
             selected: selected,
             showCheckmark: false,
             selectedColor: AppColors.green,
-            backgroundColor: AppColors.green.withOpacity(0.25),
+            backgroundColor: AppColors.green.withValues(alpha: 0.25),
             side: BorderSide.none,
             shape: const StadiumBorder(),
             onSelected: (_) => setState(() => _filter = option),
@@ -1691,64 +1660,6 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
         },
       ),
     );
-  }
-
-  Widget _messageBox(String message) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.green.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppRadius.button),
-      ),
-      child: Text(
-        message,
-        style: AppText.body.copyWith(fontSize: 14, height: 1.4),
-      ),
-    );
-  }
-
-  Widget _pillButton(
-    String label, {
-    required bool filled,
-    required VoidCallback onTap,
-  }) {
-    final color = filled ? AppColors.green : AppColors.destructive;
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadius.button),
-    );
-    const size = Size(0, 38);
-    const padding = EdgeInsets.symmetric(horizontal: 22);
-    final text = AppText.button.copyWith(
-      fontSize: 14,
-      fontWeight: FontWeight.w700,
-    );
-    return filled
-        ? ElevatedButton(
-            onPressed: onTap,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: color,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              minimumSize: size,
-              padding: padding,
-              shape: shape,
-              textStyle: text,
-            ),
-            child: Text(label),
-          )
-        : OutlinedButton(
-            onPressed: onTap,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: color,
-              side: BorderSide(color: color, width: 1.5),
-              minimumSize: size,
-              padding: padding,
-              shape: shape,
-              textStyle: text,
-            ),
-            child: Text(label),
-          );
   }
 
   /// One recommendation, in its own card outlined in its status color.
@@ -1848,93 +1759,189 @@ class _PlantProfilePageState extends State<PlantProfilePage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final hasCrop = CropService.instance.selected != null;
-    final showEmpty = CropService.instance.loaded && !hasCrop;
+  // ── 6. FLOATING BUTTONS: back to top + planting date ──
 
-    // Stack so the round "+" and "top" buttons can float over the bottom-right
-    // corner of the page, above the bottom navigation bar.
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Column(
+  /// Small round "top" button. It sits just above the "+" button.
+  Widget _buildBackToTop() {
+    return Positioned(
+      right: AppSpace.page + 5, // lines up with the centre of the 56px "+"
+      bottom: AppSpace.page + 56 + 12,
+      child: IgnorePointer(
+        ignoring: !_showTop,
+        child: AnimatedSlide(
+          offset: _showTop ? Offset.zero : const Offset(0, 0.6),
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+          child: AnimatedOpacity(
+            opacity: _showTop ? 1 : 0,
+            duration: const Duration(milliseconds: 250),
+            child: GestureDetector(
+              onTap: _scrollToTop,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.green,
+                  shape: BoxShape.circle,
+                  boxShadow: AppShadows.card,
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(AppIcons.up, size: 16, color: AppColors.onGreen),
+                    Text(
+                      'top',
+                      style: TextStyle(
+                        fontSize: 9,
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.onGreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Round "+" button that adds or edits the planting date.
+  Widget _buildPlantingDateButton() {
+    return Positioned(
+      right: AppSpace.page,
+      bottom: AppSpace.page,
+      child: FloatingActionButton(
+        heroTag: null,
+        tooltip: 'Add or edit planting date',
+        backgroundColor: AppColors.darkGreen,
+        foregroundColor: AppColors.onGreen,
+        elevation: 3,
+        shape: const CircleBorder(),
+        onPressed: _openPlantingDateDialog,
+        child: const Icon(AppIcons.add),
+      ),
+    );
+  }
+
+  // ── BUILDING BLOCKS ──
+
+  /// Card with a gray outline AND the soft shadow used by the cards on the
+  /// other pages (AppCard gives one or the other, so the shadow sits on a
+  /// wrapper).
+  Widget _outlinedShadowCard({
+    required Widget child,
+    Color color = AppColors.disabledStart,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(14),
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        boxShadow: AppShadows.card,
+      ),
+      child: AppCard(outlineColor: color, padding: padding, child: child),
+    );
+  }
+
+  /// Slim progress bar with a dark track, as in the design.
+  Widget _stageBar(double value) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        width: double.infinity,
+        height: 6,
+        child: Stack(
           children: [
-            _buildTitleBlock(),
-
-            // Body
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : showEmpty
-                      ? const AppEmptyState(
-                          icon: AppIcons.plant,
-                          title: 'No crop yet',
-                          message: 'No crop is linked to your account yet.',
-                        )
-                      : RefreshIndicator(
-                          color: AppColors.green,
-                          onRefresh: () => _fetchAll(silent: false),
-                          child: SingleChildScrollView(
-                            key: _scrollKey,
-                            controller: _scroll,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            // Extra bottom space so the floating buttons never
-                            // cover the last card.
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpace.page,
-                              AppSpace.gap,
-                              AppSpace.page,
-                              96,
-                            ),
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              fit: StackFit.passthrough,
-                              children: [
-                                Column(
-                                  children: [
-                                    _buildCropImageCard(),
-                                    _buildGrowthTimelineCard(),
-                                    _buildInsightsCard(),
-                                    _buildRecommendations(),
-                                  ],
-                                ),
-                                // Last child = drawn on top of the cards.
-                                _buildStageDetailsOverlay(
-                                  _getDaysSincePlanting(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+            const Positioned.fill(
+              child: ColoredBox(color: AppColors.emphasisOutline),
+            ),
+            Positioned.fill(
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: value.clamp(0.0, 1.0),
+                child: const ColoredBox(color: AppColors.green),
+              ),
             ),
           ],
         ),
-
-        if (hasCrop && !_isLoading) ...[
-          _buildBackToTop(),
-          Positioned(
-            right: AppSpace.page,
-            bottom: AppSpace.page,
-            child: FloatingActionButton(
-              heroTag: null,
-              tooltip: 'Add or edit planting date',
-              backgroundColor: AppColors.darkGreen,
-              foregroundColor: AppColors.onGreen,
-              elevation: 3,
-              shape: const CircleBorder(),
-              onPressed: _openPlantingDateDialog,
-              child: const Icon(AppIcons.add),
-            ),
-          ),
-        ],
-      ],
+      ),
     );
+  }
+
+  Widget _statusDot(_FactorStatus status) => Container(
+    width: 8,
+    height: 8,
+    decoration: BoxDecoration(color: status.color, shape: BoxShape.circle),
+  );
+
+  Widget _messageBox(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.green.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.button),
+      ),
+      child: Text(
+        message,
+        style: AppText.body.copyWith(fontSize: 14, height: 1.4),
+      ),
+    );
+  }
+
+  Widget _pillButton(
+    String label, {
+    required bool filled,
+    required VoidCallback onTap,
+  }) {
+    final color = filled ? AppColors.green : AppColors.destructive;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.button),
+    );
+    const size = Size(0, 38);
+    const padding = EdgeInsets.symmetric(horizontal: 22);
+    final text = AppText.button.copyWith(
+      fontSize: 14,
+      fontWeight: FontWeight.w700,
+    );
+    return filled
+        ? ElevatedButton(
+            onPressed: onTap,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: color,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              minimumSize: size,
+              padding: padding,
+              shape: shape,
+              textStyle: text,
+            ),
+            child: Text(label),
+          )
+        : OutlinedButton(
+            onPressed: onTap,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color, width: 1.5),
+              minimumSize: size,
+              padding: padding,
+              shape: shape,
+              textStyle: text,
+            ),
+            child: Text(label),
+          );
   }
 }
 
-// Small triangle on top of the stage details card, pointing up at the held
-// stage. Filled like the card, with the border drawn on its two slanted sides.
+// ═════════════════════════════════════════════════════════════════════════
+// 5. POINTER PAINTER — small triangle on top of the stage details card,
+//    pointing up at the held stage. Filled like the card, with the border
+//    drawn on its two slanted sides.
+// ═════════════════════════════════════════════════════════════════════════
+
 class _PointerPainter extends CustomPainter {
   final Color fill;
   final Color border;
@@ -1942,17 +1949,11 @@ class _PointerPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final triangle = Path()
-      ..moveTo(0, size.height)
-      ..lineTo(size.width / 2, 0)
-      ..lineTo(size.width, size.height)
-      ..close();
-    canvas.drawPath(triangle, Paint()..color = fill);
-
     final edges = Path()
       ..moveTo(0, size.height)
       ..lineTo(size.width / 2, 0)
       ..lineTo(size.width, size.height);
+    canvas.drawPath(Path.from(edges)..close(), Paint()..color = fill);
     canvas.drawPath(
       edges,
       Paint()
@@ -1967,11 +1968,12 @@ class _PointerPainter extends CustomPainter {
       old.fill != fill || old.border != border;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// PLANTING DATE POP-UP
-// A small dialog (not a new page): a date field that opens the calendar,
-// plus Cancel / Save. Pops with the chosen DateTime on Save, null on Cancel.
-// ─────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════
+// 6. PLANTING DATE POP-UP — a small dialog (not a new page): a date field
+//    that opens the calendar, plus Cancel / Save. Pops with the chosen
+//    DateTime on Save, null on Cancel.
+// ═════════════════════════════════════════════════════════════════════════
+
 class _PlantingDateDialog extends StatefulWidget {
   /// The crop's current planting date, or null when none is set yet.
   final DateTime? current;
@@ -1995,9 +1997,6 @@ class _PlantingDateDialogState extends State<_PlantingDateDialog> {
     if (_picked.isAfter(_today)) _picked = _today;
   }
 
-  String _two(int n) => n.toString().padLeft(2, '0');
-  String _fmt(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
-
   Future<void> _pickDate() async {
     // Same window as the Add Crop page (up to 120 days back), but never
     // later than the currently saved date so editing an older crop works.
@@ -2011,23 +2010,6 @@ class _PlantingDateDialogState extends State<_PlantingDateDialog> {
       lastDate: _today,
     );
     if (result != null) setState(() => _picked = result);
-  }
-
-  Widget _button(String label, Color bg, Color fg, VoidCallback onTap) {
-    return ElevatedButton(
-      onPressed: onTap,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: bg,
-        foregroundColor: fg,
-        elevation: 0,
-        minimumSize: const Size(0, 46),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.button),
-        ),
-        textStyle: AppText.button,
-      ),
-      child: Text(label),
-    );
   }
 
   @override
@@ -2064,7 +2046,9 @@ class _PlantingDateDialogState extends State<_PlantingDateDialog> {
                 ),
                 child: Row(
                   children: [
-                    Expanded(child: Text(_fmt(_picked), style: AppText.body)),
+                    Expanded(
+                      child: Text(_fmtDate(_picked), style: AppText.body),
+                    ),
                     const Icon(
                       AppIcons.timeline,
                       size: 20,
@@ -2099,6 +2083,23 @@ class _PlantingDateDialogState extends State<_PlantingDateDialog> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _button(String label, Color bg, Color fg, VoidCallback onTap) {
+    return ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: bg,
+        foregroundColor: fg,
+        elevation: 0,
+        minimumSize: const Size(0, 46),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.button),
+        ),
+        textStyle: AppText.button,
+      ),
+      child: Text(label),
     );
   }
 }

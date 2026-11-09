@@ -39,7 +39,7 @@ class WelcomeScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
             const Text(
-              'Monitor crop health in real-time with AI-powered analytics and IoT sensors.',
+              'Monitor crop health with AI-powered analytics and IoT sensors.',
               textAlign: TextAlign.center,
               style: AppText.welcomeBody,
             ),
@@ -53,7 +53,7 @@ class WelcomeScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: AppLandingButton(
-                      label: 'Get Started',
+                      label: 'Sign Up',
                       onPressed: () => Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => const GetStarted()),
@@ -63,7 +63,7 @@ class WelcomeScreen extends StatelessWidget {
                   const SizedBox(width: 15),
                   Expanded(
                     child: AppLandingButton(
-                      label: 'Log in',
+                      label: 'Sign In',
                       primary: false,
                       onPressed: () => Navigator.push(
                         context,

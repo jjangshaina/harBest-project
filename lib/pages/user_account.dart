@@ -15,15 +15,12 @@ import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 
-// Plain widget now, not its own MaterialApp — relies on the single root
-// MaterialApp defined in main.dart.
+// Relies on the single root MaterialApp defined in main.dart.
 class UserAccount extends StatelessWidget {
   const UserAccount({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return const AccountScreen();
-  }
+  Widget build(BuildContext context) => const AccountScreen();
 }
 
 class AccountScreen extends StatefulWidget {
@@ -34,24 +31,29 @@ class AccountScreen extends StatefulWidget {
 }
 
 class _AccountScreenState extends State<AccountScreen> {
-  bool _isPersonalDetailsExpanded = false;
-  bool _isPasswordSecurityExpanded = false;
-  bool _isHelpExpanded = false;
-  bool _isTermsExpanded = false;
+  static final _detailLabelStyle = AppText.label.copyWith(fontSize: 13);
+  static final _detailValueStyle = AppText.body.copyWith(fontSize: 13);
 
-  bool _isVerified = false; // email verified in Firebase Auth
+  // ── State ──
 
   // Holds the user's current full name and email for display
-  String _fullName = '';
+  String _name = '';
   String _email = '';
+  bool _isVerified = false; // email verified in Firebase Auth
   bool _isLoadingUser = true;
-  bool _hasPromptedForName = false;
+
+  bool _isPersonalDetailsExpanded = false;
+  bool _isHelpExpanded = false;
+
+  // ── Lifecycle ──
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
   }
+
+  // ── Load user data ──
 
   Future<void> _loadUserData() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -61,127 +63,137 @@ class _AccountScreenState extends State<AccountScreen> {
       return;
     }
 
+    // The name the user typed on the Create account page is saved on their
+    // login account (displayName) and in Firestore (fullName). If neither is
+    // available, fall back to the part of the email before the "@", so this
+    // page never shows an empty name or asks the user for one.
+    //
+    // Show it right away from the login account, so the page does not
+    // depend on how fast Firestore answers.
+    final displayName = user.displayName?.trim() ?? '';
+    final hasAuthName = displayName.isNotEmpty;
+    final authName = hasAuthName ? displayName : _emailPrefix(user.email);
+    setState(() {
+      _name = authName;
+      _email = user.email ?? '';
+    });
+
     try {
       // Refresh the user from Firebase so "verified" is up to date.
       try {
-        await user.reload();
+        await user.reload().timeout(kRequestTimeout);
       } catch (_) {}
 
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final docRef = _userDoc(user.uid);
+      final doc = await docRef.get().timeout(kRequestTimeout);
 
-      var data = doc.data();
-
-      if (!doc.exists) {
-        // Orphaned account (e.g. from a signup that failed partway
-        // through before this fix, or a user created outside the normal
-        // signup flow). Self-heal by writing a baseline record now, so
-        // the rest of the app has consistent data to rely on going
-        // forward. fullName is intentionally left unset here — the
-        // existing "add your name" prompt below will ask for it.
-        final defaults = <String, dynamic>{
+      final Map<String, dynamic> data;
+      if (doc.exists) {
+        data = doc.data()!;
+      } else {
+        // Orphaned account (e.g. a sign-up whose profile save failed). Self-
+        // heal by writing a baseline record in the background, with the name
+        // taken from the login account.
+        data = {
           'email': user.email ?? '',
           'createdAt': FieldValue.serverTimestamp(),
           'focus_crop': 'Mustard Green',
           'isVerified': user.emailVerified,
+          if (hasAuthName) 'fullName': authName,
         };
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set(defaults, SetOptions(merge: true));
-        data = defaults;
+        _saveInBackground(docRef, data);
       }
 
+      // Sign-up and the dashboard use "fullName"; "name" is the older field
+      // name this page used to read, kept as a fallback.
+      final stored =
+          ((data['fullName'] as String?) ?? (data['name'] as String?) ?? '')
+              .trim();
+
+      if (!mounted) return;
       setState(() {
-        _fullName = (data?['fullName'] as String?) ?? '';
+        _name = stored.isNotEmpty ? stored : authName;
         // Firestore mirrors the email saved at signup, but Auth's email
         // is the source of truth in case it was ever changed
-        _email = user.email ?? (data?['email'] as String?) ?? '';
+        _email = user.email ?? (data['email'] as String?) ?? '';
         _isLoadingUser = false;
         _isVerified =
             FirebaseAuth.instance.currentUser?.emailVerified ?? false;
       });
 
-      // Defensive sync: users who stay auto-logged-in across app restarts
-      // (via Firebase Auth's own persisted session) skip the login screen
-      // entirely, so that's not guaranteed to catch every case. Keep
-      // Firestore's isVerified aligned with the real Auth status here too.
-      final storedIsVerified = data?['isVerified'] as bool?;
-      if (storedIsVerified != user.emailVerified) {
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set({'isVerified': user.emailVerified}, SetOptions(merge: true))
-            .catchError((_) {
-          // Non-critical background sync; ignore failures here.
-        });
-      }
-
-      // Older accounts created before the fullName field existed won't
-      // have it set. Gently prompt them to add it, once per screen visit.
-      if (_fullName.isEmpty && !_hasPromptedForName) {
-        _hasPromptedForName = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _promptForMissingName();
-        });
+      if (doc.exists) {
+        final updates = <String, dynamic>{
+          // The profile has no name but the login account does: copy it over
+          // quietly so the dashboard greeting and this page agree.
+          if (stored.isEmpty && hasAuthName) 'fullName': authName,
+          // Defensive sync: users who stay auto-logged-in across app restarts
+          // (via Firebase Auth's own persisted session) skip the login screen
+          // entirely, so that's not guaranteed to catch every case. Keep
+          // Firestore's isVerified aligned with the real Auth status here too.
+          if ((data['isVerified'] as bool?) != user.emailVerified)
+            'isVerified': user.emailVerified,
+        };
+        if (updates.isNotEmpty) _saveInBackground(docRef, updates);
       }
     } catch (e) {
-      setState(() => _isLoadingUser = false);
+      debugPrint('Account load error: $e');
       if (!mounted) return;
+      setState(() => _isLoadingUser = false);
+      // The name is already shown from the login account, so a slow or
+      // missing connection is not worth an error message.
+      if (isConnectionError(e)) return;
       AppSnack.show(
         context,
-        'Failed to load account details: $e',
+        'Failed to load account details. Please try again.',
         type: AppSnackType.error,
       );
     }
   }
 
-  Future<void> _promptForMissingName() async {
-    final shouldAddName = await AppDialog.confirm(
-      context,
-      title: 'Add your full name',
-      message: "We don't have a name on file for your account yet. "
-          "Would you like to add one now?",
-      confirmLabel: 'Add Name',
-      cancelLabel: 'Later',
-    );
-
-    if (shouldAddName) {
-      if (!mounted) return;
-      // Reuse the same edit flow used for the "Edit" button
-      _handleEditFullName();
-    }
+  // The part of the email before the "@", or '' if there is none.
+  static String _emailPrefix(String? email) {
+    final at = email?.indexOf('@') ?? -1;
+    return at < 0 ? '' : email!.substring(0, at);
   }
+
+  DocumentReference<Map<String, dynamic>> _userDoc(String uid) =>
+      FirebaseFirestore.instance.collection('users').doc(uid);
+
+  // Fire-and-forget merge write; failures are non-critical and ignored.
+  void _saveInBackground(
+    DocumentReference<Map<String, dynamic>> ref,
+    Map<String, dynamic> fields,
+  ) {
+    ref.set(fields, SetOptions(merge: true)).catchError((_) {});
+  }
+
+  // ── Account ──
 
   Future<void> _handleEditFullName() async {
     final newName = await AppDialog.textInput(
       context,
-      title: 'Edit Full Name',
-      initialValue: _fullName,
-      hint: 'Enter your full name',
+      title: 'Edit Name',
+      initialValue: _name,
+      hint: 'Enter your name',
     );
 
-    if (newName == null || newName == _fullName) return;
+    if (newName == null || newName == _name) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set({'fullName': newName}, SetOptions(merge: true));
+      await _userDoc(user.uid)
+          .set({'fullName': newName, 'name': newName}, SetOptions(merge: true));
+      // Keep the login account's name in step (best effort).
+      user.updateDisplayName(newName).catchError((_) {});
 
       if (!mounted) return;
-      setState(() {
-        _fullName = newName;
-      });
+      setState(() => _name = newName);
 
       AppSnack.show(
         context,
-        'Full name updated successfully',
+        'Name updated successfully',
         type: AppSnackType.success,
       );
     } catch (e) {
@@ -194,34 +206,18 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  // ── Help & Support ─────────────────────────────────────────────────────
+  // ── Help & Support ──
 
-  Future<void> _launch(Uri uri) async {
-    try {
-      final ok = await launchUrl(uri);
-      if (!ok && mounted) {
-        AppSnack.show(
-          context,
-          "Couldn't open that on this phone.",
-          type: AppSnackType.error,
-        );
-      }
-    } catch (_) {
-      if (!mounted) return;
-      AppSnack.show(
-        context,
-        "Couldn't open that on this phone.",
-        type: AppSnackType.error,
-      );
-    }
-  }
-
-  void _openContact({required String value, required bool isPhone, String? subject}) {
-    if (value.trim().isEmpty) {
+  void _openContact({
+    required String value,
+    required bool isPhone,
+    String? subject,
+  }) {
+    final v = value.trim();
+    if (v.isEmpty) {
       AppSnack.show(context, "This contact hasn't been set up yet.");
       return;
     }
-    final v = value.trim();
     if (isPhone) {
       _launch(Uri(scheme: 'tel', path: v));
     } else {
@@ -231,15 +227,39 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  void _openInfo(String title, List<InfoSection> sections) {
+  Future<void> _launch(Uri uri) async {
+    bool ok;
+    try {
+      ok = await launchUrl(uri);
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && mounted) {
+      AppSnack.show(
+        context,
+        "Couldn't open that on this phone.",
+        type: AppSnackType.error,
+      );
+    }
+  }
+
+  void _openInfo(
+    String title,
+    List<InfoSection> sections, {
+    bool collapsible = false,
+  }) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => InfoPage(title: title, sections: sections),
+        builder: (_) => InfoPage(
+          title: title,
+          sections: sections,
+          collapsible: collapsible,
+        ),
       ),
     );
   }
 
-  // ── Logout / Delete ────────────────────────────────────────────────────
+  // ── Logout / Delete ──
 
   Future<void> _handleLogout() async {
     final confirmed = await AppDialog.confirm(
@@ -249,28 +269,21 @@ class _AccountScreenState extends State<AccountScreen> {
       confirmLabel: 'Logout',
       destructive: true,
     );
+    if (!confirmed) return;
 
-    if (confirmed) {
-      // Sign out of Firebase. AuthGate in main.dart reacts to this via
-      // authStateChanges() and routes back to the Welcome screen on its
-      // own — no separate local "logged in" flag to clear.
-      await FirebaseAuth.instance.signOut();
-      CropService.instance.clear(); 
-      if (!mounted) return;
-
-      // Navigate to Harbest welcome screen and remove all previous routes to prevent back navigation
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomePage()),
-        (route) => false,
-      );
-    }
+    // Sign out of Firebase. AuthGate in main.dart reacts to this via
+    // authStateChanges() and routes back to the Welcome screen on its
+    // own — no separate local "logged in" flag to clear.
+    await FirebaseAuth.instance.signOut();
+    CropService.instance.clear();
+    if (!mounted) return;
+    _goToWelcome();
   }
 
   Future<void> _handleDeleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.email == null) return;
-
-    
+    final email = user?.email;
+    if (user == null || email == null) return;
 
     final confirmed = await AppDialog.confirm(
       context,
@@ -295,14 +308,11 @@ class _AccountScreenState extends State<AccountScreen> {
     try {
       // Firebase needs a recent sign-in before deleting an account.
       await user.reauthenticateWithCredential(
-        EmailAuthProvider.credential(email: user.email!, password: password),
+        EmailAuthProvider.credential(email: email, password: password),
       );
 
       // Remove the user's record, then the account.
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .delete();
+      await _userDoc(user.uid).delete();
       await user.delete();
 
       if (!mounted) return;
@@ -311,10 +321,7 @@ class _AccountScreenState extends State<AccountScreen> {
         'Your account has been deleted.',
         type: AppSnackType.success,
       );
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomePage()),
-        (route) => false,
-      );
+      _goToWelcome();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       final message = switch (e.code) {
@@ -337,6 +344,17 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
+  // Go to the Harbest welcome screen and remove all previous routes to
+  // prevent back navigation.
+  void _goToWelcome() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const HomePage()),
+      (route) => false,
+    );
+  }
+
+  // ── UI ──
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -357,21 +375,19 @@ class _AccountScreenState extends State<AccountScreen> {
                       icon: AppIcons.profile,
                       title: 'Personal Details',
                       expanded: _isPersonalDetailsExpanded,
-                      onTap: () => setState(() {
-                        _isPersonalDetailsExpanded =
-                            !_isPersonalDetailsExpanded;
-                      }),
+                      onTap: () => setState(() =>
+                          _isPersonalDetailsExpanded =
+                              !_isPersonalDetailsExpanded),
                       child: _buildPersonalDetailsContent(),
                     ),
-                    AppExpandableTile(
+                    AppMenuTile(
                       icon: AppIcons.security,
-                      title: 'Password & Security',
-                      expanded: _isPasswordSecurityExpanded,
-                      onTap: () => setState(() {
-                        _isPasswordSecurityExpanded =
-                            !_isPasswordSecurityExpanded;
-                      }),
-                      child: _buildPasswordSecurityContent(),
+                      title: 'Password',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ChangePassword(),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -383,29 +399,18 @@ class _AccountScreenState extends State<AccountScreen> {
                       icon: AppIcons.help,
                       title: 'Help & Support',
                       expanded: _isHelpExpanded,
-                      onTap: () => setState(() {
-                        _isHelpExpanded = !_isHelpExpanded;
-                      }),
+                      onTap: () =>
+                          setState(() => _isHelpExpanded = !_isHelpExpanded),
                       child: _buildHelpContent(),
-                    ),
-                    AppExpandableTile(
-                      icon: AppIcons.terms,
-                      title: 'Terms & Privacy',
-                      expanded: _isTermsExpanded,
-                      onTap: () => setState(() {
-                        _isTermsExpanded = !_isTermsExpanded;
-                      }),
-                      child: _buildOptionRow(
-                        icon: AppIcons.terms,
-                        label: 'Terms & Conditions',
-                        onTap: () =>
-                            _openInfo('Terms & Conditions', kTermsSections),
-                      ),
                     ),
                     AppMenuTile(
                       icon: AppIcons.aboutUs,
                       title: 'About Us',
-                      onTap: () => _openInfo('About Us', kAboutSections),
+                      onTap: () => _openInfo(
+                        'About Us',
+                        kAboutSections,
+                        collapsible: true,
+                      ),
                     ),
                   ],
                 ),
@@ -450,7 +455,7 @@ class _AccountScreenState extends State<AccountScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _fullName.isNotEmpty ? _fullName : (_isLoadingUser ? '' : 'Your Name'),
+              _name.isNotEmpty ? _name : (_isLoadingUser ? '' : 'Your Name'),
               style: AppText.cardTitle,
             ),
             const SizedBox(height: 2),
@@ -477,11 +482,8 @@ class _AccountScreenState extends State<AccountScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildDetailRow(
-          'Full Name:',
-          Text(
-            _fullName.isNotEmpty ? _fullName : 'Not set',
-            style: AppText.body.copyWith(fontSize: 13),
-          ),
+          'Name:',
+          Text(_name.isNotEmpty ? _name : 'Not set', style: _detailValueStyle),
         ),
         const SizedBox(height: 14),
         _buildDetailRow(
@@ -489,7 +491,7 @@ class _AccountScreenState extends State<AccountScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_email, style: AppText.body.copyWith(fontSize: 13)),
+              Text(_email, style: _detailValueStyle),
               const SizedBox(height: 6),
               AppStatusPill(
                 text: _isVerified ? 'Verified' : 'Not verified',
@@ -519,37 +521,10 @@ class _AccountScreenState extends State<AccountScreen> {
       children: [
         SizedBox(
           width: 76,
-          child: Text(label, style: AppText.label.copyWith(fontSize: 13)),
+          child: Text(label, style: _detailLabelStyle),
         ),
         const SizedBox(width: 8),
         Expanded(child: value),
-      ],
-    );
-  }
-
-  // Password & Security
-  Widget _buildPasswordSecurityContent() {
-    return Column(
-      children: [
-        _buildOptionRow(
-          icon: AppIcons.lock,
-          label: 'Change Password',
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ChangePassword()),
-            );
-          },
-        ),
-        const SizedBox(height: 14),
-        _buildOptionRow(
-          icon: AppIcons.twoFactor,
-          label: 'Two-Factor Authentication',
-          onTap: () => AppDialog.info(
-            context,
-            title: 'Two-Factor Authentication',
-            message: 'Two-factor authentication is coming soon.',
-          ),
-        ),
       ],
     );
   }
@@ -559,7 +534,10 @@ class _AccountScreenState extends State<AccountScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Contact Us or Send Feedback', style: AppText.label.copyWith(color: AppColors.darkGreen)),
+        Text(
+          'Send Feedback or Contact Us',
+          style: AppText.label.copyWith(color: AppColors.darkGreen),
+        ),
         const SizedBox(height: 10),
         _buildContactRow(
           icon: AppIcons.mail,
@@ -605,30 +583,11 @@ class _AccountScreenState extends State<AccountScreen> {
               textAlign: TextAlign.right,
               overflow: TextOverflow.ellipsis,
               style: AppText.subtitle.copyWith(
-                color: isBlank ? AppColors.textTertiary : AppColors.textSecondary,
+                color:
+                    isBlank ? AppColors.textTertiary : AppColors.textSecondary,
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOptionRow({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.green),
-          const SizedBox(width: 10),
-          Text(label, style: AppText.body.copyWith(fontSize: 14)),
-          const Spacer(),
-          const Icon(AppIcons.forward, size: 18, color: AppColors.textTertiary),
         ],
       ),
     );

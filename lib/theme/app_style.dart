@@ -28,7 +28,6 @@ class AppColors {
   static const Color rowBackground = Color(0xFFF9F9F9); // expanded list rows
   static const Color cardGray = Color(0xFFF0F0F0);
 
-
   // Text
   static const Color textPrimary = Colors.black87;
   static const Color textSecondary = Colors.black54;
@@ -46,14 +45,20 @@ class AppColors {
   // Sign-in / sign-up screens (dark green background)
   static const Color authBackground = Color(0xFF2D5A27);
   static const Color authField = Color(0xFFD9D9D9); // text field fill
-  static const Color fieldLight = Color(0xFFEDEDED); // text field on light pages
+  static const Color fieldLight = Color(
+    0xFFEDEDED,
+  ); // text field on light pages
   static const Color authAccent = Color(0xFF7DB343); // links, button start
   static const Color authAccentDark = Color(0xFF4C7A2D); // button end
   static const Color onDarkError = Color(0xFFFF5252); // red text on dark green
-  static const Color onDarkSuccess = Color(0xFF69F0AE); // green text on dark green
+  static const Color onDarkSuccess = Color(
+    0xFF69F0AE,
+  ); // green text on dark green
   static const Color disabledStart = Color(0xFFBDBDBD); // inactive button
   static const Color disabledEnd = Color(0xFF757575);
-  static const Color brandOnDark = Color(0xFF619A32); // "HarBest" name on dark green
+  static const Color brandOnDark = Color(
+    0xFF619A32,
+  ); // "HarBest" name on dark green
 }
 
 // ── SIZES ──
@@ -96,9 +101,9 @@ class AppText {
   );
 
   static const TextStyle headerSubtitle = TextStyle(
-  color: AppColors.onGreen,
-  fontSize: 12,
-);
+    color: AppColors.onGreen,
+    fontSize: 12,
+  );
 
   // Big heading of a section ("Sensor Overview")
   static const TextStyle sectionTitle = TextStyle(
@@ -267,6 +272,10 @@ class AppIcons {
   static const IconData alertsOff = CupertinoIcons.bell_slash_fill;
   static const IconData add = CupertinoIcons.add;
   static const IconData done = CupertinoIcons.checkmark;
+  static const IconData cam = CupertinoIcons.camera;
+  static const IconData harvest = Icons.agriculture_outlined;
+  static const IconData thumbUp = Icons.thumb_up_outlined;
+  static const IconData thumbDown = Icons.thumb_down_outlined;
 
   // forms
   static const IconData visible = CupertinoIcons.eye;
@@ -301,16 +310,16 @@ enum HealthLevel { optimal, caution, critical }
 
 extension HealthLevelX on HealthLevel {
   String get label => switch (this) {
-        HealthLevel.optimal => 'Optimal',
-        HealthLevel.caution => 'Caution',
-        HealthLevel.critical => 'Critical',
-      };
+    HealthLevel.optimal => 'Optimal',
+    HealthLevel.caution => 'Caution',
+    HealthLevel.critical => 'Critical',
+  };
 
   Color get color => switch (this) {
-        HealthLevel.optimal => AppColors.optimal,
-        HealthLevel.caution => AppColors.caution,
-        HealthLevel.critical => AppColors.critical,
-      };
+    HealthLevel.optimal => AppColors.optimal,
+    HealthLevel.caution => AppColors.caution,
+    HealthLevel.critical => AppColors.critical,
+  };
 }
 
 // ── APP THEME ──
@@ -366,8 +375,10 @@ class AppTheme {
       inputDecorationTheme: InputDecorationThemeData(
         filled: true,
         fillColor: AppColors.card,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.field),
           borderSide: const BorderSide(color: AppColors.outline),
@@ -399,6 +410,5 @@ class IosScrollBehavior extends MaterialScrollBehavior {
     BuildContext context,
     Widget child,
     ScrollableDetails details,
-  ) =>
-      child;
+  ) => child;
 }

@@ -53,7 +53,7 @@ class DeviceStatusPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
+            color: color.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
@@ -136,7 +136,7 @@ class _PulsingDotState extends State<_PulsingDot>
                 height: 8 + 6 * _c.value,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: widget.color.withOpacity(0.35 * (1 - _c.value)),
+                  color: widget.color.withValues(alpha: 0.35 * (1 - _c.value)),
                 ),
               ),
             Container(
@@ -226,7 +226,7 @@ class _DeviceStatusSheet extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: conn.color.withOpacity(0.10),
+              color: conn.color.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: Row(
@@ -373,7 +373,7 @@ class _DeviceStatusSheet extends StatelessWidget {
       false => ('Not responding', AppColors.critical),
       null => ('Unknown', AppColors.textTertiary),
     };
-    final shown = live ? color : color.withOpacity(0.55);
+    final shown = live ? color : color.withValues(alpha: 0.55);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
