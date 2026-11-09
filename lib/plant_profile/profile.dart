@@ -11,13 +11,14 @@ import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
-import 'package:flutter_application_harbest_1/plant_profile/ai_recommendation_card.dart';
 import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 
 import 'package:flutter_application_harbest_1/plant_profile/insight_rules.dart';
+import 'package:flutter_application_harbest_1/plant_profile/ai_merge.dart';
+import 'package:flutter_application_harbest_1/services/ai_insights_service.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show normalizeReading;
 
@@ -439,8 +440,13 @@ class _PlantProfilePageState extends State<PlantProfilePage>
 
   // Readings and the recommendations built from them.
   List<Map<String, dynamic>> _recentReadings = []; // newest → oldest
-  List<Recommendation> _recs = [];
+  List<Recommendation> _recs = []; // rule cards with Gemini's advice merged in
+  List<Recommendation> _ruleRecs = []; // rule cards only
   final Map<String, _Hidden> _hidden = {};
+
+  // Latest Gemini advice for this device (live, from ai_recommendations).
+  AiRecommendation? _ai;
+  StreamSubscription<AiRecommendation?>? _aiSub;
   InsightCategory? _filter; // null = All
   String? _readingsError;
   bool _isLoading = true;
@@ -483,6 +489,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
   @override
   void dispose() {
     _timer?.cancel();
+    _aiSub?.cancel();
     _peekTimer?.cancel();
     _scroll.dispose();
     CropService.instance.removeListener(_onCropChanged);
@@ -513,10 +520,13 @@ class _PlantProfilePageState extends State<PlantProfilePage>
       return;
     }
     _loadedDevice = crop?.deviceId;
+    _listenToAi(crop?.deviceId);
     setState(() {
       _isLoading = true;
       _recentReadings = [];
       _recs = [];
+      _ruleRecs = [];
+      _ai = null;
       _readingsError = null;
       _showTop = false;
     });
@@ -555,8 +565,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
           .timeout(kRequestTimeout);
 
       // Ignore the result if the user switched crop while this was loading.
-      if (!mounted ||
-          CropService.instance.selected?.deviceId != crop.deviceId) {
+      if (!mounted || CropService.instance.selected?.deviceId != crop.deviceId) {
         return;
       }
 
@@ -616,18 +625,38 @@ class _PlantProfilePageState extends State<PlantProfilePage>
     // Forget hidden items whose sensor is back in range, so a new problem
     // later is not silently hidden.
     final before = _hidden.length;
+    // (Gemini-only cards start with "ai:"; they simply expire after the snooze.)
     final activeKeys = {for (final r in recs) r.key};
-    _hidden.removeWhere((k, _) => !activeKeys.contains(k));
+    _hidden.removeWhere((k, _) => !k.startsWith('ai:') && !activeKeys.contains(k));
 
     setState(() {
       _recentReadings = rows;
-      _recs = recs;
+      _ruleRecs = recs;
+      _recs = mergeAiActions(recs, _ai, rows.isEmpty ? null : rows.first);
       _readingsError = rows.isEmpty
           ? 'No sensor data found for this crop yet.'
           : null;
       _isLoading = false;
     });
     if (_hidden.length != before) _saveHidden();
+  }
+
+  /// Follows the newest Gemini advice for [deviceId] and merges it into the
+  /// cards whenever it changes. Errors are ignored: the rule cards still show.
+  void _listenToAi(String? deviceId) {
+    _aiSub?.cancel();
+    _aiSub = null;
+    if (deviceId == null) return;
+    _aiSub = AiInsightsService.recommendation(deviceId).listen(
+      (ai) {
+        if (!mounted || _loadedDevice != deviceId) return;
+        setState(() {
+          _ai = ai;
+          _recs = mergeAiActions(_ruleRecs, ai, _latestReading);
+        });
+      },
+      onError: (_) {},
+    );
   }
 
   Map<String, dynamic>? get _latestReading =>
@@ -675,8 +704,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
       (jsonDecode(raw) as Map<String, dynamic>).forEach((key, value) {
         final m = value as Map<String, dynamic>;
         final until = DateTime.fromMillisecondsSinceEpoch(m['until'] as int);
-        if (until.isAfter(now))
-          _hidden[key] = _Hidden(until, m['level'] as int);
+        if (until.isAfter(now)) _hidden[key] = _Hidden(until, m['level'] as int);
       });
     } catch (_) {
       // Unreadable saved state: start fresh.
@@ -939,51 +967,46 @@ class _PlantProfilePageState extends State<PlantProfilePage>
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : showEmpty
-                  // Pullable too, so a failed start-up can be retried.
-                  ? AppRefreshable(
-                      onRefresh: () => _fetchAll(silent: false),
-                      child: CropService.instance.offline
-                          ? const AppOfflineState()
-                          : const AppNoCropState(),
-                    )
-                  : RefreshIndicator(
-                      color: AppColors.green,
-                      onRefresh: () => _fetchAll(silent: false),
-                      child: SingleChildScrollView(
-                        key: _scrollKey,
-                        controller: _scroll,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        // Extra bottom space so the floating buttons never
-                        // cover the last card.
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpace.page,
-                          AppSpace.gap,
-                          AppSpace.page,
-                          96,
-                        ),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          fit: StackFit.passthrough,
-                          children: [
-                            Column(
+                      // Pullable too, so a failed start-up can be retried.
+                      ? AppRefreshable(
+                          onRefresh: () => _fetchAll(silent: false),
+                          child: CropService.instance.offline
+                              ? const AppOfflineState()
+                              : const AppNoCropState(),
+                        )
+                      : RefreshIndicator(
+                          color: AppColors.green,
+                          onRefresh: () => _fetchAll(silent: false),
+                          child: SingleChildScrollView(
+                            key: _scrollKey,
+                            controller: _scroll,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            // Extra bottom space so the floating buttons never
+                            // cover the last card.
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpace.page,
+                              AppSpace.gap,
+                              AppSpace.page,
+                              96,
+                            ),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              fit: StackFit.passthrough,
                               children: [
-                                _buildCropImageCard(days),
-                                _buildGrowthTimelineCard(days),
-                                AiRecommendationCard(
-                                  deviceId:
-                                      CropService.instance.selected?.deviceId ??
-                                      'harbest_pi_zero_w',
+                                Column(
+                                  children: [
+                                    _buildCropImageCard(days),
+                                    _buildGrowthTimelineCard(days),
+                                    _buildInsightsCard(open),
+                                    _buildRecommendations(open),
+                                  ],
                                 ),
-                                _buildInsightsCard(open),
-                                _buildRecommendations(open),
+                                // Last child = drawn on top of the cards.
+                                _buildStageDetailsOverlay(days),
                               ],
                             ),
-                            // Last child = drawn on top of the cards.
-                            _buildStageDetailsOverlay(days),
-                          ],
+                          ),
                         ),
-                      ),
-                    ),
             ),
           ],
         ),
@@ -1396,11 +1419,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                AppIcons.tip,
-                size: 13,
-                color: AppColors.textSecondary,
-              ),
+              const Icon(AppIcons.tip, size: 13, color: AppColors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1701,6 +1720,10 @@ class _PlantProfilePageState extends State<PlantProfilePage>
                     ),
                     const Spacer(),
                     AppStatusPill.level(r.level),
+                    if (r is AiRecItem) ...[
+                      const SizedBox(width: 8),
+                      const AiChip(),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -1732,6 +1755,10 @@ class _PlantProfilePageState extends State<PlantProfilePage>
                   if (!priority) ...[
                     const SizedBox(width: 8),
                     AppStatusPill.level(r.level),
+                    if (r is AiRecItem) ...[
+                      const SizedBox(width: 6),
+                      const AiChip(),
+                    ],
                   ],
                 ],
               ),
