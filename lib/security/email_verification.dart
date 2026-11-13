@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_application_harbest_1/pages/log_in.dart';
+import 'package:flutter_application_harbest_1/pages/sign_in.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';

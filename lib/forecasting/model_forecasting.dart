@@ -1,27 +1,23 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/services/forecast_service.dart';
-
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/app_empty_state.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/sensor_chip_selector.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
-
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
 
 // ═════════════════════════════════════════════════════════════════════════
-// 1. CONSTANTS & STYLES
+// CONSTANTS & STYLES
 // ═════════════════════════════════════════════════════════════════════════
 
 const _forecastColor = Color(0xFFD9822B);
@@ -40,7 +36,7 @@ const _axisStyle = TextStyle(fontSize: 10, color: AppColors.textSecondary);
 const _noTitles = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
 // ═════════════════════════════════════════════════════════════════════════
-// 2. FORECAST DATA — parsed chart lines
+// FORECAST DATA — parsed chart lines
 // ═════════════════════════════════════════════════════════════════════════
 
 class _Forecast {
@@ -73,7 +69,7 @@ _Forecast _parse(Map<String, dynamic> v, double k) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// 3. HELPERS — formatting and status labels
+// HELPERS — formatting and status labels
 // ═════════════════════════════════════════════════════════════════════════
 
 String _horizonText(num minutes) {
@@ -99,6 +95,50 @@ String _axisLabel(double h) {
   return '${h < 0 ? '-' : '+'}$text';
 }
 
+// ── AXIS STEPS ──
+// fl_chart draws a label at every multiple of the interval PLUS one at the
+// axis min and max. With an odd interval (e.g. 16.25 min) or odd edges
+// (e.g. -35 min, 4.8) the edge label lands on top of its neighbour
+// ("-35m" over "-33m"). Round steps + hiding crowded edges fixes that.
+
+/// Time step in hours on round minutes (5m, 10m, 15m, 30m, 1h, ...),
+/// giving at most about [maxTicks] labels across [rangeHrs].
+double _timeStep(double rangeHrs, int maxTicks) {
+  const minutes = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 4320, 10080];
+  final raw = rangeHrs / maxTicks;
+  for (final m in minutes) {
+    if (m / 60.0 >= raw) return m / 60.0;
+  }
+  return raw;
+}
+
+/// Value step of 1, 2, 2.5 or 5 × 10^n, giving at most about [maxTicks]
+/// labels across [range].
+double _niceStep(double range, int maxTicks) {
+  final raw = range / maxTicks;
+  final mag = math.pow(10, (math.log(raw) / math.ln10).floor()).toDouble();
+  for (final m in const [1.0, 2.0, 2.5, 5.0, 10.0]) {
+    if (m * mag >= raw - 1e-12) return m * mag;
+  }
+  return 10 * mag;
+}
+
+/// True for an axis min/max label that is not on the interval and sits
+/// too close to the nearest interval label, so it would overlap it.
+bool _crowdedEdge(double v, TitleMeta meta) {
+  final step = meta.appliedInterval;
+  if (step <= 0) return false;
+  const eps = 1e-6;
+  final isMin = (v - meta.min).abs() < eps;
+  final isMax = (v - meta.max).abs() < eps;
+  if (!isMin && !isMax) return false;
+  final ratio = v / step;
+  if ((ratio - ratio.round()).abs() < eps) return false; // on the interval
+  // Nearest interval label inside the axis.
+  final tick = (isMin ? ratio.ceil() : ratio.floor()) * step;
+  return (tick - v).abs() < step * 0.6;
+}
+
 Color _statusColor(String s) => switch (s) {
   'optimal' => AppColors.optimal,
   'caution' => AppColors.caution,
@@ -114,7 +154,7 @@ String _statusLabel(String s) => switch (s) {
 };
 
 // ═════════════════════════════════════════════════════════════════════════
-// 4. FORECASTING PAGE
+// FORECASTING PAGE
 // ═════════════════════════════════════════════════════════════════════════
 
 class AiForecasting extends StatefulWidget {
@@ -161,7 +201,7 @@ class _AiForecastingState extends State<AiForecasting>
     super.dispose();
   }
 
-  // ─────────────────────────── NO INTERNET (OfflineNotice) ───────────────────────────
+  // ─────────────────────────── NO INTERNET ───────────────────────────
 
   @override
   int get tabIndex => 3;
@@ -273,9 +313,6 @@ class _AiForecastingState extends State<AiForecasting>
     }
   }
 
-  // "Updated 5 mins ago", from the newest reading's timestamp. The stored
-  // clock fields are already local time, so they are rebuilt as a local
-  // DateTime before comparing with now (same as the Plant Profile page).
   String _updatedText() {
     final raw = _latestTimestamp;
     if (raw == null) return '';
@@ -319,7 +356,17 @@ class _AiForecastingState extends State<AiForecasting>
     return Map<String, dynamic>.from(vars[name] as Map);
   }
 
-  // ═══════════════════════════ UI (top of screen → bottom) ═══════════════════════════
+  // Experimental notice. The pipeline's note may already start with
+  // "Experimental:", so the prefix is only added when it is missing.
+  String _experimentalText() {
+    final note = (_run?['note'] ?? '').toString().trim();
+    if (note.isEmpty) return 'Experimental forecast.';
+    return note.toLowerCase().startsWith('experimental')
+        ? note
+        : 'Experimental: $note';
+  }
+
+  // ═══════════════════════════ UI (top of screen to bottom) ═══════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -373,16 +420,16 @@ class _AiForecastingState extends State<AiForecasting>
     final k = _sensorKey == 'EC' ? 0.001 : 1.0; // µS/cm -> mS/cm
 
     return _scrollable([
-      // 1. Sensor selector
+      // Sensor selector
       SensorChipSelector(
         selectedKey: _sensorKey,
         onChanged: (key) => setState(() => _sensorKey = key),
       ),
       const SizedBox(height: AppSpace.cardGap),
 
-      // 2. Run notices
+      // Run notices
       if (_run!['status'] == 'experimental') ...[
-        _banner('Experimental: ${_run!['note']}', AppColors.info),
+        _banner(_experimentalText(), AppColors.info),
         const SizedBox(height: AppSpace.gap),
       ],
       if (_run!['stale'] == true) ...[
@@ -393,7 +440,7 @@ class _AiForecastingState extends State<AiForecasting>
         const SizedBox(height: AppSpace.gap),
       ],
 
-      // 3. Forecast for the selected sensor
+      // Forecast for the selected sensor
       if (v == null)
         _buildNotAvailableCard(def)
       else
@@ -429,19 +476,24 @@ class _AiForecastingState extends State<AiForecasting>
     return [
       _buildOutlookCard(v, def, k, horizon),
       const SizedBox(height: AppSpace.gap),
-      Row(
-        children: [
-          _infoCard(
-            'Predicted in $horizon',
-            '${predicted.toStringAsFixed(def.decimals)}${def.unit}',
-            badge: AppStatusPill(
-              text: _statusLabel(status),
-              color: _statusColor(status),
+      // Both info cards share one height and start their text on the same
+      // line: IntrinsicHeight + stretch makes the shorter card grow to match.
+      IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _infoCard(
+              'Predicted in $horizon',
+              '${predicted.toStringAsFixed(def.decimals)}${def.unit}',
+              badge: AppStatusPill(
+                text: _statusLabel(status),
+                color: _statusColor(status),
+              ),
             ),
-          ),
-          const SizedBox(width: AppSpace.gap),
-          _infoCard('Leaves optimal range', leaveText),
-        ],
+            const SizedBox(width: AppSpace.gap),
+            _infoCard('Leaves optimal range', leaveText),
+          ],
+        ),
       ),
       const SizedBox(height: AppSpace.gap),
       _buildSuggestedAction(v['suggested_action'] as String),
@@ -506,6 +558,9 @@ class _AiForecastingState extends State<AiForecasting>
     var minX = f.actual.first.x;
     final maxX = f.predicted.last.x;
     if (minX >= 0) minX = -(maxX / 2);
+    // Round time step (e.g. 15 min) so labels fall on -30m, -15m, Now,
+    // +15m, +30m instead of -33m, -16m, +16m.
+    final xStep = _timeStep(maxX - minX, 5);
 
     final ys = <double>[
       for (final s in [f.actual, f.predicted, f.upper, f.lower])
@@ -521,7 +576,12 @@ class _AiForecastingState extends State<AiForecasting>
     }
     final pad = (hi - lo) * 0.1;
     final minY = lo - pad, maxY = hi + pad;
-    final yStep = (maxY - minY) / 4;
+    // Round value step (e.g. 0.5 pH) that the label precision can show,
+    // so no two labels read the same.
+    final yStep = math.max(
+      _niceStep(maxY - minY, 5),
+      math.pow(10, -def.decimals).toDouble(),
+    );
 
     // Invisible lines for the confidence band's upper and lower edges.
     LineChartBarData edge(List<FlSpot> s) => LineChartBarData(
@@ -576,19 +636,22 @@ class _AiForecastingState extends State<AiForecasting>
               showTitles: true,
               reservedSize: 44,
               interval: yStep,
-              getTitlesWidget: (y, _) =>
-                  Text(y.toStringAsFixed(def.decimals), style: _axisStyle),
+              getTitlesWidget: (y, meta) => _crowdedEdge(y, meta)
+                  ? const SizedBox.shrink()
+                  : Text(y.toStringAsFixed(def.decimals), style: _axisStyle),
             ),
           ),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 24,
-              interval: (maxX - minX) / 4,
-              getTitlesWidget: (x, _) => Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(_axisLabel(x), style: _axisStyle),
-              ),
+              interval: xStep,
+              getTitlesWidget: (x, meta) => _crowdedEdge(x, meta)
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(_axisLabel(x), style: _axisStyle),
+                    ),
             ),
           ),
         ),
@@ -603,6 +666,9 @@ class _AiForecastingState extends State<AiForecasting>
           LineChartBarData(
             spots: f.actual,
             isCurved: true,
+            // Stops the curve from swinging past the readings (the dip
+            // below the lowest real value).
+            preventCurveOverShooting: true,
             color: AppColors.healthy,
             barWidth: 2.5,
             dotData: const FlDotData(show: false),
@@ -668,13 +734,21 @@ class _AiForecastingState extends State<AiForecasting>
     child: Text(text, style: AppText.body.copyWith(fontSize: 13, height: 1.4)),
   );
 
+  // Info card used for both "Predicted in ..." and "Leaves optimal range":
+  // same padding, title style and value style, content pinned to the top.
   Widget _infoCard(String title, String value, {Widget? badge}) => Expanded(
     child: AppCard(
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.start,
         children: [
-          Text(title, style: AppText.caption.copyWith(fontSize: 12)),
+          Text(
+            title,
+            style: AppText.caption.copyWith(fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 6),
           Text(value, style: AppText.cardTitle),
           if (badge != null) ...[const SizedBox(height: 6), badge],

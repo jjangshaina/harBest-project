@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_harbest_1/pages/get_started.dart';
-import 'package:flutter_application_harbest_1/pages/log_in.dart';
+import 'package:flutter_application_harbest_1/pages/sign_up.dart';
+import 'package:flutter_application_harbest_1/pages/sign_in.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 

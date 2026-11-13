@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_application_harbest_1/pages/log_in.dart';
+import 'package:flutter_application_harbest_1/pages/sign_in.dart';
 import 'package:flutter_application_harbest_1/security/email_verification.dart';
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
@@ -31,6 +31,9 @@ const Set<String> _blockedDomains = {
 final _emailRegex =
     RegExp(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$');
 
+final _nameInvalidChars = RegExp(r'[^\p{L} ]', unicode: true);
+final _nameValid = RegExp(r'^\p{L}+( \p{L}+)*$', unicode: true);
+
 // Returns true if the email passes format check and is not a blocked domain
 bool _isValidEmail(String email) {
   final trimmed = email.trim();
@@ -38,6 +41,8 @@ bool _isValidEmail(String email) {
   final domain = trimmed.substring(trimmed.indexOf('@') + 1).toLowerCase();
   return !_blockedDomains.contains(domain);
 }
+
+
 
 String _emailError(String email) {
   final trimmed = email.trim();
@@ -103,8 +108,8 @@ class _GetStartedState extends State<GetStarted> {
       _hasSpecialChar &&
       _passwordsMatch;
 
-  bool get _formIsValid =>
-      _nameController.text.isNotEmpty &&
+   bool get _formIsValid =>
+      _nameValid.hasMatch(_nameController.text.trim()) &&
       _emailValid &&
       _passwordController.text.isNotEmpty &&
       _confirmPasswordController.text.isNotEmpty &&
@@ -140,6 +145,9 @@ class _GetStartedState extends State<GetStarted> {
       _passwordsMatch = value == _passwordController.text;
     });
   }
+
+    // Strips digits and special characters as the user types or pastes.
+  
 
   // ── Create account ──
 
@@ -266,7 +274,7 @@ class _GetStartedState extends State<GetStarted> {
         final fresh = auth.currentUser ?? user;
         if (fresh.emailVerified) {
           await auth.signOut();
-          throw e; // a finished account: really "already exists"
+          rethrow; // a finished account: really "already exists"
         }
         return fresh;
       } on FirebaseAuthException catch (signInError) {
@@ -367,14 +375,20 @@ class _GetStartedState extends State<GetStarted> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AuthField(
+            AuthField(
             label: 'Full name',
             hint: 'Enter your full name',
             icon: AppIcons.person,
             controller: _nameController,
             onChanged: (_) => setState(() {}),
-            showError: _submitAttempted && _nameController.text.isEmpty,
-            errorText: 'Full Name is required.',
+            showError: _nameController.text.contains(_nameInvalidChars) ||
+                (_submitAttempted &&
+                    !_nameValid.hasMatch(_nameController.text.trim())),
+            errorText: _nameController.text.trim().isEmpty
+                ? 'Full Name is required.'
+                : _nameController.text.contains(_nameInvalidChars)
+                    ? 'Name cannot contain numbers or special characters.'
+                    : 'Enter a valid name (single spaces between words).',
           ),
 
           AuthField(

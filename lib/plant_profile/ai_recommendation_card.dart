@@ -158,7 +158,7 @@ class AiRecommendationCard extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Container(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(children: [
                 Icon(icon, color: color),
@@ -243,7 +243,7 @@ class AiPhotoCard extends StatelessWidget {
               AspectRatio(
                 aspectRatio: 16 / 9,
                 child: Image.network(imageUrl, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image))),
+                    errorBuilder: (_, _, _) => const Center(child: Icon(Icons.broken_image))),
               ),
             Padding(
               padding: const EdgeInsets.all(16),

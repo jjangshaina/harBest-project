@@ -6,7 +6,7 @@ import 'pages/home_page.dart';
 import 'pages/user_dashboard.dart';
 import 'firebase_options.dart';
 import 'theme/app_style.dart';
-import 'pages/log_in.dart' show loginInProgress;
+import 'pages/sign_in.dart' show loginInProgress;
 import 'security/email_verification.dart' show PendingSignup;
 import 'widgets/app_walkthrough.dart';
 

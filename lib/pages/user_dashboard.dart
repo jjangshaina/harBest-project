@@ -1,18 +1,13 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
 import 'package:flutter_application_harbest_1/services/device_status.dart';
 import 'package:flutter_application_harbest_1/services/supabase_claim.dart';
-
 import 'package:flutter_application_harbest_1/widgets/app_bottom_nav.dart';
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
@@ -21,7 +16,6 @@ import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/device_status_widgets.dart';
 import 'package:flutter_application_harbest_1/widgets/plant_image.dart';
 import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
-
 import 'package:flutter_application_harbest_1/pages/add_crop.dart';
 import 'package:flutter_application_harbest_1/pages/user_account.dart';
 import 'package:flutter_application_harbest_1/analytics/analytics_data.dart';
@@ -180,6 +174,9 @@ const List<SensorDef> kSensors = [
     tolerance: 12,
     optimalText: 'Below 27°C',
   ),
+  // Hartatie et al. 2025 (pakcoy mustard, hydroponic): EC 0.8–2.4 mS/cm
+  // tested, best growth at 2.0. NOTE: this is a nutrient-solution range;
+  // an in-soil probe reads bulk EC, which runs well below solution EC.
   SensorDef(
     key: 'EC',
     label: 'EC',
@@ -277,16 +274,23 @@ class _DashboardScreenState extends State<DashboardScreen>
     borderRadius: BorderRadius.circular(AppRadius.field),
   );
 
-  // Overall health weights: moisture 25%, pH 20%, NPK (combined) 20%,
-  // temperature 15%, humidity 10%, heat index 5%. EC is not scored.
-  // Weights are renormalized by whatever is present, so only the ratios
-  // matter. Ranges come from [kSensors].
+  // Overall health weights (sum to 100%): moisture 25%, pH 20%,
+  // NPK (combined) 20%, temperature 15%, humidity 10%, heat index 5%,
+  // EC 5%. Weights are renormalized by whatever is present, so a missing
+  // sensor never drags the score down. Ranges come from [kSensors].
+  //
+  // EC is scored on both sides of its range: too low means too few
+  // dissolved nutrients, too high means salt stress (FAO/Maas & Grattan
+  // rate leafy brassicas "moderately sensitive" to salinity). Its weight is
+  // kept small because low-cost NPK probes estimate N, P and K from the
+  // same conductivity reading, so EC is already partly counted via NPK.
   static const Map<String, double> _scoreWeights = {
     'pH': 0.20,
     'moisture': 0.25,
     'temperature': 0.15,
     'humidity': 0.10,
     'heat_index': 0.05,
+    'EC': 0.05,
   };
 
   // Nitrogen, phosphorus and potassium are averaged into one "NPK" factor.

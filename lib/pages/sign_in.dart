@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_application_harbest_1/pages/get_started.dart';
+import 'package:flutter_application_harbest_1/pages/sign_up.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart';
 import 'package:flutter_application_harbest_1/security/forgot_password.dart';
 import 'package:flutter_application_harbest_1/security/email_verification.dart';
@@ -27,6 +27,8 @@ final _emailRegex = RegExp(
 );
 bool _hasValidEmailFormat(String email) =>
     !email.contains('..') && _emailRegex.hasMatch(email.trim());
+
+
 
 class LogIn extends StatefulWidget {
   const LogIn({super.key});

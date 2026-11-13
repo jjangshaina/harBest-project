@@ -47,7 +47,6 @@ class _ChangePasswordState extends State<ChangePassword> {
   Timer? _checkTimer;
   String? _currentError;
   bool _checkingCurrent = false;
-  bool _currentVerified = false;
   String? _lastCheckedText; // avoids re-checking an unchanged password
 
   @override
@@ -109,7 +108,6 @@ class _ChangePasswordState extends State<ChangePassword> {
     _lastCheckedText = null;
     setState(() {
       _currentError = null;
-      _currentVerified = false;
     });
     if (value.isNotEmpty) {
       _checkTimer = Timer(_checkDelay, _verifyCurrentPassword);
@@ -125,7 +123,6 @@ class _ChangePasswordState extends State<ChangePassword> {
     if (text.length < _minPasswordLength) {
       setState(() {
         _currentError = 'Current password is incorrect.';
-        _currentVerified = false;
       });
       return;
     }
@@ -166,7 +163,6 @@ class _ChangePasswordState extends State<ChangePassword> {
       _checkingCurrent = false;
       if (!stale) {
         _currentError = error;
-        _currentVerified = verified;
         _lastCheckedText = verified ? text : null;
       }
     });

@@ -63,13 +63,7 @@ class _AccountScreenState extends State<AccountScreen> {
       return;
     }
 
-    // The name the user typed on the Create account page is saved on their
-    // login account (displayName) and in Firestore (fullName). If neither is
-    // available, fall back to the part of the email before the "@", so this
-    // page never shows an empty name or asks the user for one.
-    //
-    // Show it right away from the login account, so the page does not
-    // depend on how fast Firestore answers.
+    
     final displayName = user.displayName?.trim() ?? '';
     final hasAuthName = displayName.isNotEmpty;
     final authName = hasAuthName ? displayName : _emailPrefix(user.email);

@@ -1,20 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'package:flutter_application_harbest_1/theme/app_style.dart';
-
 import 'package:flutter_application_harbest_1/services/crop_services.dart';
-
 import 'package:flutter_application_harbest_1/widgets/app_button.dart';
 import 'package:flutter_application_harbest_1/widgets/app_card.dart';
 import 'package:flutter_application_harbest_1/widgets/app_header.dart';
 import 'package:flutter_application_harbest_1/widgets/app_snackbar.dart';
 import 'package:flutter_application_harbest_1/widgets/sensor_chip_selector.dart';
-
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
     show SensorDef, kSensors;
 
@@ -46,7 +41,7 @@ const Map<String, String> _shortNames = {
 
 const _months = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 
 ];
 
 const _axisStyle = TextStyle(fontSize: 10, color: AppColors.textSecondary);
@@ -286,8 +281,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
   final _pageScroll = ScrollController();
   bool _showTop = false;
 
-  // Re-reads the newest reading every 30s; this also keeps "Updated x mins
-  // ago" counting up.
+  // Re-reads the newest reading every 30s;
   Timer? _timer;
 
   // ─────────────────────────── LIFECYCLE ───────────────────────────
@@ -840,7 +834,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ── 1. COVERAGE BANNER ──
+  // ── COVERAGE BANNER ──
 
   Widget _buildCoverageBanner() {
     final hasDates = _covStart != null || _covEnd != null;
@@ -894,9 +888,9 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ── 2. SENSOR SELECTOR: shared SensorChipSelector (see build) ──
+  // SENSOR SELECTOR: shared SensorChipSelector (see build)
 
-  // ── 3. WEEKLY AVERAGE ──
+  // WEEKLY AVERAGE ──
 
   Widget _buildWeeklyCard(SensorDef def) {
     final pts = _weekly.data;
@@ -947,7 +941,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ── 4. READINGS BY CROP HEALTH ──
+  // READINGS BY CROP HEALTH ──
 
   Widget _buildBreakdownCard(SensorDef def) => _card(
     title: 'Readings by Crop Health',
@@ -996,7 +990,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ── 5. SENSOR CORRELATIONS ──
+  // ── SENSOR CORRELATIONS ──
 
   Widget _buildCorrelationCard(SensorDef def) => _card(
     title: 'Sensor Correlations',
@@ -1048,7 +1042,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ── 6. DAILY ROLLING AVERAGE ──
+  // ── DAILY ROLLING AVERAGE ──
 
   Widget _buildDailyCard(SensorDef def) {
     final pts = _daily.data;
@@ -1193,7 +1187,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
     );
   }
 
-  // ── 7. BACK TO TOP (floats above the page) ──
+  // BACK TO TOP (floats above the page) ──
 
   Widget _buildBackToTop() {
     return Positioned(
@@ -1330,10 +1324,7 @@ class _AiAnalyticsState extends State<AiAnalytics>
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// 6. INFO BUTTON — small (i) for the top-right of a chart card. Press and
-//    hold it to show [message] in a bubble under the icon; the bubble
-//    disappears as soon as the finger is lifted.
-// ═════════════════════════════════════════════════════════════════════════
+// INFO BUTTON — small (i) for the top-right of a chart card.
 
 class _InfoButton extends StatefulWidget {
   final String message;

@@ -18,7 +18,7 @@ import 'package:flutter_application_harbest_1/widgets/status_widgets.dart';
 
 import 'package:flutter_application_harbest_1/plant_profile/insight_rules.dart';
 import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
-    show normalizeReading;
+    show SensorDef, kSensors, normalizeReading;
 
 // ═════════════════════════════════════════════════════════════════════════
 // 1. GROWTH STAGES (also used by harvest_service.dart)
@@ -75,215 +75,25 @@ const List<GrowthStage> kGrowthStages = [
 ];
 
 // ═════════════════════════════════════════════════════════════════════════
-// 2. OPTIMAL CONDITIONS PER STAGE
+// 2. FEEDING GUIDANCE PER STAGE
 // ═════════════════════════════════════════════════════════════════════════
 
-/// Three-band range used to classify a raw sensor value against what's
-/// ideal for mustard greens.
-class RangeSpec {
-  final double optimalMin;
-  final double optimalMax;
-  final double acceptableMin;
-  final double acceptableMax;
-
-  const RangeSpec({
-    required this.optimalMin,
-    required this.optimalMax,
-    required this.acceptableMin,
-    required this.acceptableMax,
-  });
-}
-
-/// The six sensor-backed ranges plus an NPK note, specific to one growth
-/// stage. Needs differ across the growth cycle — e.g. germination wants
-/// consistently wet soil to trigger sprouting, while vegetative growth
-/// wants more moderate moisture and peak nitrogen. These are general
-/// horticultural targets for mustard greens; treat them as a reasonable
-/// starting point to refine against your own results over time.
-///
-/// [ec] is in mS/cm (the same unit the dashboard shows).
-class StageConditions {
-  final RangeSpec pH;
-  final RangeSpec soilMoisture;
-  final RangeSpec temperature;
-  final RangeSpec humidity;
-  final RangeSpec heatIndex;
-  final RangeSpec ec;
-  final String npkGuidance;
-
-  const StageConditions({
-    required this.pH,
-    required this.soilMoisture,
-    required this.temperature,
-    required this.humidity,
-    required this.heatIndex,
-    required this.ec,
-    required this.npkGuidance,
-  });
-}
-
-/// One entry per stage in [kGrowthStages], keyed by [GrowthStage.name].
-const Map<String, StageConditions> kStageConditions = {
-  'Germination': StageConditions(
-    pH: RangeSpec(
-      optimalMin: 6.0,
-      optimalMax: 7.0,
-      acceptableMin: 5.5,
-      acceptableMax: 7.5,
-    ),
-    soilMoisture: RangeSpec(
-      optimalMin: 65,
-      optimalMax: 80,
-      acceptableMin: 55,
-      acceptableMax: 85,
-    ),
-    temperature: RangeSpec(
-      optimalMin: 20,
-      optimalMax: 25,
-      acceptableMin: 15,
-      acceptableMax: 27,
-    ),
-    humidity: RangeSpec(
-      optimalMin: 60,
-      optimalMax: 80,
-      acceptableMin: 50,
-      acceptableMax: 90,
-    ),
-    heatIndex: RangeSpec(
-      optimalMin: 20,
-      optimalMax: 25,
-      acceptableMin: 15,
-      acceptableMax: 27,
-    ),
-    ec: RangeSpec(
-      optimalMin: 0.8,
-      optimalMax: 1.5,
-      acceptableMin: 0.5,
-      acceptableMax: 2.0,
-    ),
-    npkGuidance:
-        'Minimal feeding needed — the seed itself supplies early nutrients.',
-  ),
-  'Seedling': StageConditions(
-    pH: RangeSpec(
-      optimalMin: 6.0,
-      optimalMax: 7.0,
-      acceptableMin: 5.5,
-      acceptableMax: 7.5,
-    ),
-    soilMoisture: RangeSpec(
-      optimalMin: 55,
-      optimalMax: 70,
-      acceptableMin: 45,
-      acceptableMax: 75,
-    ),
-    temperature: RangeSpec(
-      optimalMin: 18,
-      optimalMax: 22,
-      acceptableMin: 12,
-      acceptableMax: 26,
-    ),
-    humidity: RangeSpec(
-      optimalMin: 55,
-      optimalMax: 75,
-      acceptableMin: 45,
-      acceptableMax: 85,
-    ),
-    heatIndex: RangeSpec(
-      optimalMin: 18,
-      optimalMax: 22,
-      acceptableMin: 12,
-      acceptableMax: 26,
-    ),
-    ec: RangeSpec(
-      optimalMin: 1.0,
-      optimalMax: 1.8,
-      acceptableMin: 0.7,
-      acceptableMax: 2.2,
-    ),
-    npkGuidance: 'Begin light nitrogen feeding to support early leaf growth.',
-  ),
-  'Vegetative': StageConditions(
-    pH: RangeSpec(
-      optimalMin: 6.0,
-      optimalMax: 7.0,
-      acceptableMin: 5.5,
-      acceptableMax: 7.5,
-    ),
-    soilMoisture: RangeSpec(
-      optimalMin: 40,
-      optimalMax: 60,
-      acceptableMin: 30,
-      acceptableMax: 70,
-    ),
-    temperature: RangeSpec(
-      optimalMin: 15,
-      optimalMax: 20,
-      acceptableMin: 10,
-      acceptableMax: 25,
-    ),
-    humidity: RangeSpec(
-      optimalMin: 50,
-      optimalMax: 70,
-      acceptableMin: 40,
-      acceptableMax: 80,
-    ),
-    heatIndex: RangeSpec(
-      optimalMin: 15,
-      optimalMax: 20,
-      acceptableMin: 10,
-      acceptableMax: 27,
-    ),
-    ec: RangeSpec(
-      optimalMin: 1.2,
-      optimalMax: 2.4,
-      acceptableMin: 0.8,
-      acceptableMax: 3.0,
-    ),
-    npkGuidance:
-        'Highest nitrogen demand of the whole cycle — this drives leaf growth.',
-  ),
-  'Harvesting': StageConditions(
-    pH: RangeSpec(
-      optimalMin: 6.0,
-      optimalMax: 7.0,
-      acceptableMin: 5.5,
-      acceptableMax: 7.5,
-    ),
-    soilMoisture: RangeSpec(
-      optimalMin: 40,
-      optimalMax: 60,
-      acceptableMin: 30,
-      acceptableMax: 70,
-    ),
-    temperature: RangeSpec(
-      optimalMin: 15,
-      optimalMax: 20,
-      acceptableMin: 10,
-      acceptableMax: 25,
-    ),
-    humidity: RangeSpec(
-      optimalMin: 50,
-      optimalMax: 70,
-      acceptableMin: 40,
-      acceptableMax: 80,
-    ),
-    heatIndex: RangeSpec(
-      optimalMin: 15,
-      optimalMax: 20,
-      acceptableMin: 10,
-      acceptableMax: 27,
-    ),
-    ec: RangeSpec(
-      optimalMin: 1.2,
-      optimalMax: 2.4,
-      acceptableMin: 0.8,
-      acceptableMax: 3.0,
-    ),
-    npkGuidance:
-        'Maintain balanced NPK; ease off heavy nitrogen as leaves mature.',
-  ),
+/// Feeding tip shown under the optimal conditions of each stage, keyed by
+/// [GrowthStage.name]. The ranges themselves are shared with the Dashboard
+/// ([kSensors] in user_dashboard.dart), so both pages always agree.
+const Map<String, String> kStageNpkGuidance = {
+  'Germination':
+      'Minimal feeding needed — the seed itself supplies early nutrients.',
+  'Seedling': 
+      'Begin light nitrogen feeding to support early leaf growth.',
+  'Vegetative':
+      'Highest nitrogen demand of the whole cycle — this drives leaf growth.',
+  'Harvesting':
+      'Maintain balanced NPK; ease off heavy nitrogen as leaves mature.',
 };
+
+// The Dashboard's sensor definitions by key ('pH', 'moisture', ...).
+final Map<String, SensorDef> _sensorDefs = {for (final d in kSensors) d.key: d};
 
 // ═════════════════════════════════════════════════════════════════════════
 // 3. MODELS & HELPERS
@@ -321,7 +131,7 @@ class _Hidden {
   const _Hidden(this.until, this.level);
 }
 
-// "2026-05-07" — the format of the `planting_date` column.
+// the format of the `planting_date` column.
 String _fmtDate(DateTime d) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${d.year}-${two(d.month)}-${two(d.day)}';
@@ -341,14 +151,15 @@ int _stageIndexFor(int daysSincePlanting) {
   return kGrowthStages.length - 1;
 }
 
-_FactorStatus _statusForValue(RangeSpec range, double value) {
-  if (value >= range.optimalMin && value <= range.optimalMax) {
-    return _FactorStatus.optimal;
-  }
-  if (value >= range.acceptableMin && value <= range.acceptableMax) {
-    return _FactorStatus.caution;
-  }
-  return _FactorStatus.critical;
+// Same cut-offs as the Dashboard's Sensor Overview cards: Optimal inside
+// [min, max]; Caution while less than halfway to the tolerance limit (the
+// Dashboard's score >= 50); Critical beyond that.
+_FactorStatus _statusFor(SensorDef def, double value) {
+  if (value >= def.min && value <= def.max) return _FactorStatus.optimal;
+  final deviation = value < def.min ? def.min - value : value - def.max;
+  return deviation <= def.tolerance / 2
+      ? _FactorStatus.caution
+      : _FactorStatus.critical;
 }
 
 /// The device already classifies NPK status per reading in `nutrient_rec`
@@ -365,29 +176,6 @@ _FactorStatus _statusFromNutrientRec(String? nutrientRec) {
     return _FactorStatus.caution;
   }
   return _FactorStatus.unknown;
-}
-
-/// Composite score: optimal = 2 points, caution = 1, critical = 0.
-/// Unknown factors are excluded from both the numerator and denominator
-/// so missing sensors don't drag the score down unfairly.
-int? _growthConditionsScore(List<_ConditionFactor> factors) {
-  var known = 0, points = 0;
-  for (final f in factors) {
-    switch (f.status) {
-      case _FactorStatus.optimal:
-        known++;
-        points += 2;
-      case _FactorStatus.caution:
-        known++;
-        points += 1;
-      case _FactorStatus.critical:
-        known++;
-      case _FactorStatus.unknown:
-        break;
-    }
-  }
-  if (known == 0) return null;
-  return ((points / (known * 2)) * 100).round();
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -553,7 +341,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
           .limit(_recentReadingsWindow)
           .timeout(kRequestTimeout);
 
-      // Ignore the result if the user switched crop while this was loading.
+
       if (!mounted || CropService.instance.selected?.deviceId != crop.deviceId) {
         return;
       }
@@ -780,20 +568,16 @@ class _PlantProfilePageState extends State<PlantProfilePage>
 
   // ─────────────────────────── GROWTH CONDITIONS ───────────────────────────
 
-  /// Builds the seven-factor breakdown for one specific stage, checked
-  /// against that stage's own ideal ranges (not a single global set) —
-  /// germination and harvesting want different soil moisture and
-  /// temperature, for instance. Uses the latest reading for every value.
-  List<_ConditionFactor> _buildConditionFactorsForStage(String stageName) {
-    final ranges = kStageConditions[stageName]!;
+  /// Builds the seven-factor breakdown from the latest reading, checked
+  /// against the Dashboard's shared optimal ranges ([kSensors]).
+  List<_ConditionFactor> _buildConditionFactors() {
     final latest = _latestReading;
 
     // One sensor value shown with [digits] decimals and checked against
-    // [range]; "—" when the reading has no value for it.
+    // that sensor's shared range; "—" when the reading has no value for it.
     _ConditionFactor measured(
       String name,
       String key,
-      RangeSpec range,
       int digits, [
       String unit = '',
     ]) {
@@ -802,18 +586,20 @@ class _PlantProfilePageState extends State<PlantProfilePage>
       return _ConditionFactor(
         name: name,
         displayValue: v == null ? '—' : '${v.toStringAsFixed(digits)}$unit',
-        status: v == null ? _FactorStatus.unknown : _statusForValue(range, v),
+        status: v == null
+            ? _FactorStatus.unknown
+            : _statusFor(_sensorDefs[key]!, v),
       );
     }
 
     final nutrientRec = latest?['nutrient_rec'] as String?;
     return [
-      measured('Soil pH', 'pH', ranges.pH, 1),
-      measured('Soil moisture', 'moisture', ranges.soilMoisture, 0, '%'),
-      measured('Temperature', 'temperature', ranges.temperature, 1, '°C'),
-      measured('Humidity', 'humidity', ranges.humidity, 0, '%'),
-      measured('Heat index', 'heat_index', ranges.heatIndex, 1, '°C'),
-      measured('EC', 'EC', ranges.ec, 2),
+      measured('Soil pH', 'pH', 1),
+      measured('Soil moisture', 'moisture', 0, '%'),
+      measured('Temperature', 'temperature', 1, '°C'),
+      measured('Humidity', 'humidity', 0, '%'),
+      measured('Heat index', 'heat_index', 1, '°C'),
+      measured('EC', 'EC', 2),
       _ConditionFactor(
         name: 'N-P-K',
         displayValue: nutrientRec ?? 'No data',
@@ -1305,8 +1091,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
   /// Optimal-conditions breakdown for one stage, checked against that
   /// stage's own target ranges: a two-column grid of tags, then N-P-K.
   Widget _buildStageConditionsPanel(String stageName) {
-    final factors = _buildConditionFactorsForStage(stageName);
-    final score = _growthConditionsScore(factors);
+    final factors = _buildConditionFactors();
     final optimalCount = factors
         .where((f) => f.status == _FactorStatus.optimal)
         .length;
@@ -1327,38 +1112,13 @@ class _PlantProfilePageState extends State<PlantProfilePage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'OPTIMAL CONDITIONS',
-                  style: AppText.label.copyWith(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-              if (score != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.green.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '$score%',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.darkGreen,
-                    ),
-                  ),
-                ),
-            ],
+          Text(
+            'OPTIMAL CONDITIONS',
+            style: AppText.label.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
           ),
           const SizedBox(height: 1),
           Text(
@@ -1392,7 +1152,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  kStageConditions[stageName]!.npkGuidance,
+                  kStageNpkGuidance[stageName]!,
                   style: AppText.caption.copyWith(
                     fontSize: 10.5,
                     color: AppColors.textSecondary,
@@ -1816,7 +1576,7 @@ class _PlantProfilePageState extends State<PlantProfilePage>
       bottom: AppSpace.page,
       child: FloatingActionButton(
         heroTag: null,
-        tooltip: 'Add or edit planting date',
+        tooltip: 'Edit planting date',
         backgroundColor: AppColors.darkGreen,
         foregroundColor: AppColors.onGreen,
         elevation: 3,
