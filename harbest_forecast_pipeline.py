@@ -28,12 +28,19 @@ from sklearn.preprocessing import StandardScaler
 warnings.filterwarnings("ignore")
 
 # ============================== CONFIG ====================================
-TARGETS = ["moisture_pct", "temperature", "humidity", "pH", "EC"]
-SENSORS = ["temperature", "humidity", "soil_temp", "pH", "EC", "moisture_pct"]
-UNITS = {"moisture_pct": "%", "temperature": "°C", "humidity": "%", "pH": "", "EC": "µS/cm"}
+TARGETS = ["moisture_pct", "temperature", "humidity", "pH", "EC", "nitrogen", "phosphorus", "potassium"]
+SENSORS = ["temperature", "humidity", "soil_temp", "pH", "EC", "moisture_pct", "nitrogen", "phosphorus", "potassium"]
+# Sensors used as INPUTS for other variables. NPK is left out on purpose: it only
+# exists in recent readings, and requiring it would throw away the older history.
+FEATURE_SENSORS = ["temperature", "humidity", "soil_temp", "pH", "EC", "moisture_pct"]
+MIN_POINTS = 10             # a variable needs this many resampled points to be forecast
+UNITS = {"moisture_pct": "%", "temperature": "°C", "humidity": "%", "pH": "", "EC": "µS/cm",
+         "nitrogen": " mg/kg", "phosphorus": " mg/kg", "potassium": " mg/kg"}
 # PLACEHOLDER optimal ranges - replace with values justified for mustard greens.
 OPTIMAL = {"moisture_pct": (60, 80), "temperature": (15, 25),
-           "humidity": (60, 80), "pH": (6.0, 7.0), "EC": None}
+           "humidity": (60, 80), "pH": (6.0, 7.0), "EC": None,
+           # minimums match the app (UW-Madison soil-test ranges); no real upper limit
+           "nitrogen": (30, 3000), "phosphorus": (20, 3000), "potassium": (20, 3000)}
 TZ = "Asia/Manila"
 DEVICE_ID = "harbest_pi_zero_w"
 GAP_SECONDS = 600            # a gap longer than this starts a new segment
@@ -119,7 +126,7 @@ def build_frame(ts, target, h, fset, step, sensors, snaive_P):
             X["hour_cos"] = np.cos(2 * np.pi * frac / 24)
         if fset == "lags+time+sensors":
             for c in sensors:
-                if c != target:
+                if c != target and c in FEATURE_SENSORS:
                     X[c] = seg[c]
             last, since = None, []
             for i, w in enumerate(seg["moisture_jump"].values):
@@ -288,6 +295,10 @@ def action_text(target, status, leave_t, direction):
         return "Forecast stays within the optimal range."
     if status == "n/a":
         return "No optimal range set for this variable."
+    if status == "out_of_range":
+        if target in ("nitrogen", "phosphorus", "potassium") and direction == "low":
+            return f"{target.capitalize()} is below the recommended level - consider fertilizing."
+        return f"Currently {'below' if direction == 'low' else 'above'} the optimal range; check conditions."
     return f"Forecast leaves the optimal range{when}; check conditions."
 
 def main():
@@ -308,7 +319,10 @@ def main():
     if not seg.usable.any():
         raise SystemExit("No continuous segment long enough. Collect more continuous data.")
     ts = resample(df, seg, sensors, cfg["step"])
-    targets = [t for t in TARGETS if t in sensors]
+    targets = [t for t in TARGETS if t in sensors and ts[t].notna().sum() >= MIN_POINTS]
+    skipped = [t for t in TARGETS if t in sensors and t not in targets]
+    if skipped:
+        print(f"not enough recent data yet to forecast (skipped): {skipped}")
 
     banner(3, "Feature engineering")
     print(f"lags(0..{N_LAGS-1}), rolling mean, time-of-day sin/cos ({TZ}), other sensors, "

@@ -73,14 +73,15 @@ def clean(df):
     df = df.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp")
     if "moisture" in df and "moisture_pct" not in df:
         df = df.rename(columns={"moisture": "moisture_pct"})
-    for c in ["temperature", "humidity", "heat_index", "soil_temp", "pH", "EC", "moisture_pct"]:
+    for c in ["temperature", "humidity", "heat_index", "soil_temp", "pH", "EC", "moisture_pct",
+              "nitrogen", "phosphorus", "potassium"]:
         if c in df:
             df[c] = pd.to_numeric(df[c], errors="coerce")
         else:
             df[c] = np.nan
 
     dead = (df["moisture_pct"] == 0) & (df["EC"] == 0)          # probe disconnected
-    df.loc[dead, ["moisture_pct", "EC", "pH"]] = np.nan
+    df.loc[dead, ["moisture_pct", "EC", "pH", "nitrogen", "phosphorus", "potassium"]] = np.nan
 
     old = df["timestamp"] < FIRMWARE_FIX                          # old firmware scale
     df.loc[old, "moisture_pct"] *= 10
