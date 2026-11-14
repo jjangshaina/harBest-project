@@ -127,9 +127,9 @@ const List<SensorDef> kSensors = [
     unit: '',
     icon: AppIcons.soilPh,
     min: 6.0,
-    max: 7.0,
+    max: 7.5,
     tolerance: 1.5,
-    optimalText: '6.0 – 7.0',
+    optimalText: '6.0 – 7.5',
   ),
   SensorDef(
     key: 'moisture',
@@ -149,8 +149,8 @@ const List<SensorDef> kSensors = [
     icon: AppIcons.temperature,
     min: 15,
     max: 25,
-    tolerance: 14,
-    optimalText: '15°C – 25°C',
+    tolerance: 10,
+    optimalText: '15°C – 24°C',
   ),
   SensorDef(
     key: 'humidity',
@@ -1292,7 +1292,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     ];
   }
 
-  // ── 3. CROP HEALTH + ACTIVE ALERTS ──
+  // ── 3. CROP CONDITION + ACTIVE ALERTS ──
 
   // Overall health ring + "Active alerts" card. Gray, no border.
   Widget _buildTopInsightCards(Map<String, double?> scores) {
@@ -1307,7 +1307,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       statusText = 'No data';
       statusColor = Colors.grey;
     } else if (score >= 75) {
-      statusText = 'Healthy';
+      statusText = 'Good';
       statusColor = AppColors.healthy;
     } else if (score >= 45) {
       statusText = 'Caution';
@@ -1323,7 +1323,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Crop Health (overall score ring) ──
+          // ── Crop Condition (overall score ring) ──
           Expanded(
             child: AppCard(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -1351,7 +1351,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Text(
-                            'Crop Health',
+                            'Crop Condition',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
