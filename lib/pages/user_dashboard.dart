@@ -1452,6 +1452,15 @@ class _DashboardScreenState extends State<DashboardScreen>
             ],
           ),
         ),
+        // Battery: small icon + "73%" beside the status pill. Only shown
+        // once the Pi has reported a battery level. Tap -> volts / state.
+        if (_deviceId != null && (_deviceStatus?.hasBattery ?? false)) ...[
+          BatteryBadge(
+            status: _deviceStatus!,
+            connection: _currentStatusView().connection,
+          ),
+          const SizedBox(width: 8),
+        ],
         if (_deviceId != null)
           DeviceStatusPill(
             connection: _currentStatusView().connection,

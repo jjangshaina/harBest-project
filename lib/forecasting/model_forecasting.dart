@@ -23,13 +23,16 @@ import 'package:flutter_application_harbest_1/pages/user_dashboard.dart'
 const _forecastColor = Color(0xFFD9822B);
 
 /// App sensor key -> variable name used by the forecast pipeline.
-/// Sensors not listed (heat index, N, P, K) have no forecast yet.
+/// Sensors not listed (heat index) have no forecast yet.
 const _varNames = {
   'moisture': 'moisture_pct',
   'pH': 'pH',
   'temperature': 'temperature',
   'humidity': 'humidity',
   'EC': 'EC',
+  'nitrogen': 'nitrogen',
+  'phosphorus': 'phosphorus',
+  'potassium': 'potassium',
 };
 
 const _axisStyle = TextStyle(fontSize: 10, color: AppColors.textSecondary);
